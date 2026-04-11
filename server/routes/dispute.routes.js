@@ -11,13 +11,14 @@ const router = Router();
 router.get('/queue', auth, requireRole('moderator'), async (req, res, next) => {
   try {
     const { limit = 20, skip = 0 } = req.query;
-    const queue = await Submission.find({ state: 'IN_DISPUTE' })
+    const query = { state: { $in: ['IN_DISPUTE', 'FLAGGED'] } };
+    const queue = await Submission.find(query)
       .sort({ createdAt: 1 })
       .skip(Number(skip))
       .limit(Number(limit))
       .populate('user', 'username email totalPoints submissionCount')
       .lean();
-    const total = await Submission.countDocuments({ state: 'IN_DISPUTE' });
+    const total = await Submission.countDocuments(query);
     res.json({ queue, total });
   } catch (err) {
     next(err);
@@ -73,8 +74,8 @@ router.post('/:id/resolve', auth, requireRole('moderator'), async (req, res, nex
 
     const sub = await Submission.findById(req.params.id);
     if (!sub) return res.status(404).json({ error: 'Submission not found' });
-    if (sub.state !== 'IN_DISPUTE') {
-      return res.status(422).json({ error: 'Submission is not IN_DISPUTE', currentState: sub.state });
+    if (!['IN_DISPUTE', 'FLAGGED'].includes(sub.state)) {
+      return res.status(422).json({ error: 'Submission is not in a resolvable state', currentState: sub.state });
     }
 
     const resolved = await DisputeService.resolveManual(sub, req.user._id, category, outcome);

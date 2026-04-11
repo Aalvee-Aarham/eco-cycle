@@ -28,18 +28,27 @@ export const DisputeService = {
         confidence: result.confidence,
       };
 
-      // Use secondary result as final category
-      submission.category = result.category;
-      submission.subcategory = result.subcategory;
+      // Only auto-resolve if secondary classifier is SURE
+      if (result.confidence >= config.CONFIDENCE_THRESHOLD) {
+        submission.category = result.category;
+        submission.subcategory = result.subcategory;
 
-      await submission.transition('RESOLVED_AUTO');
-      await AuditService.write('DISPUTE_RESOLVED_AUTO', {
-        submissionId: submission._id,
-        secondaryResult: result,
-      });
+        await submission.transition('RESOLVED_AUTO');
+        await AuditService.write('DISPUTE_RESOLVED_AUTO', {
+          submissionId: submission._id,
+          secondaryResult: result,
+        });
 
-      await submission.transition('AWAITING_REWARD');
-      await RewardService.award(submission);
+        await submission.transition('AWAITING_REWARD');
+        await RewardService.award(submission);
+      } else {
+        // Still uncertain — leave in IN_DISPUTE for Moderator
+        await AuditService.write('DISPUTE_AUTO_FAILED_LOW_CONFIDENCE', {
+          submissionId: submission._id,
+          secondaryResult: result,
+        });
+        await submission.save();
+      }
 
       return submission;
     } catch (err) {

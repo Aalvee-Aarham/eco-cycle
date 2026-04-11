@@ -92,6 +92,12 @@ export default function DisputeDetail() {
                     ? `@${submission.user.username}`
                     : '—'}
                 </p>
+                {submission.flagReason && (
+                  <div className="mt-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+                    <p className="font-bold flex items-center gap-2">⚠️ Flagged: {submission.flagReason}</p>
+                    <p className="mt-1 opacity-80">Moderator review required to confirm if this is a genuine duplication or a valid unique submission.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -150,8 +156,11 @@ export default function DisputeDetail() {
                   onChange={(e) => setOutcome(e.target.value)}
                 />
               </div>
-              <Button onClick={onResolve} disabled={resolve.isPending || submission.state !== 'IN_DISPUTE'}>
-                {resolve.isPending ? 'Resolving…' : 'Resolve dispute'}
+              <Button
+                onClick={onResolve}
+                disabled={resolve.isPending || !['IN_DISPUTE', 'FLAGGED'].includes(submission.state)}
+              >
+                {resolve.isPending ? 'Resolving…' : 'Resolve submission'}
               </Button>
             </CardContent>
           </Card>

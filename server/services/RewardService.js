@@ -70,6 +70,13 @@ export const RewardService = {
     const existing = await Reward.findOne({ idempotencyKey });
     if (existing) return existing;
 
+    // Safety check: Ensure submission is in AWAITING_REWARD state
+    if (submission.state !== 'AWAITING_REWARD') {
+      const err = new Error(`Cannot award points for submission in state: ${submission.state}`);
+      err.status = 422;
+      throw err;
+    }
+
     const basePoints = POINTS_MAP[submission.category] || 10;
     const session = await mongoose.startSession();
     session.startTransaction();
