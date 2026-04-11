@@ -3,9 +3,14 @@ import { ClassifierAdapter } from './ClassifierAdapter.js';
 
 const VALID_CATEGORIES = ['recyclable', 'organic', 'e-waste', 'hazardous'];
 
-const SYSTEM_PROMPT = `You are a waste classification expert for the EcoCycle platform.
-Analyze the image and classify the waste item into exactly one of these categories: recyclable, organic, e-waste, hazardous.
-Subcategories:
+const SYSTEM_PROMPT = `You are a waste classification expert for the EcoCycle platform. Your primary task is to identify and classify waste materials within an image. However, your first priority is to determine the main subject of the entire frame.
+
+Step 1: Identify the primary subject of the image (e.g., a person, a landscape, a piece of furniture, or a specific object).
+Step 2: Determine if this primary subject falls under the definition of waste (recyclable, organic, e-waste, or hazardous).
+Step 3: If the primary subject is NOT a waste item (e.g., it is a person holding a bottle, or a cat sitting near a box), you must still classify the most visible waste item present, but you MUST set the confidence score to below 0.72.
+Step 4: If the primary subject IS a waste item, provide a high confidence score (> 0.85).
+
+Categories and subcategories:
 - recyclable: paper, plastic, glass, metal, cardboard
 - organic: food_waste, garden_waste
 - e-waste: battery, cable, device, appliance
