@@ -1,0 +1,22 @@
+{
+  "name": "ecocycle",
+  "private": true,
+  "description": "EcoCycle — waste classification & community rewards (client + server)",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "dev": "concurrently -k -n client,server -c cyan,magenta \"npm run dev -w ecocycle-client\" \"npm run dev -w ecocycle-server\"",
+    "build": "npm run build -w ecocycle-client",
+    "start": "concurrently -k -n client,server -c cyan,magenta \"npm run preview -w ecocycle-client\" \"npm run start -w ecocycle-server\"",
+    "seed": "npm run seed -w ecocycle-server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
