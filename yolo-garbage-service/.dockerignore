@@ -4,3 +4,6 @@ __pycache__
 .streamlit
 venv
 .env
+notebooks
+streamlit_demo.py
+requirements.txt
