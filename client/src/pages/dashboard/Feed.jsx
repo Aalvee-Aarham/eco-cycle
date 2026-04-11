@@ -26,9 +26,10 @@ export default function Feed() {
       <p className="text-slate-500 mb-8">Updates from people you follow.</p>
 
       {isLoading && !items.length ? (
-        <div className="space-y-6 max-w-xl mx-auto">
-          <Skeleton className="h-64 w-full rounded-xl" />
-          <Skeleton className="h-64 w-full rounded-xl" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <Skeleton className="h-[400px] w-full rounded-xl" />
+          <Skeleton className="h-[400px] w-full rounded-xl hidden md:block" />
+          <Skeleton className="h-[400px] w-full rounded-xl hidden lg:block" />
         </div>
       ) : items.length === 0 ? (
         <EmptyState
@@ -41,7 +42,7 @@ export default function Feed() {
           }
         />
       ) : (
-        <div className="space-y-6 max-w-xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {items.map((s) => {
             const u = s.user;
             const uname = typeof u === 'object' && u?.username ? u.username : 'user';
@@ -55,7 +56,7 @@ export default function Feed() {
             }
 
             return (
-              <Card key={s._id} className="overflow-hidden bg-white border-slate-200 hover:border-slate-300 transition-colors shadow-sm hover:shadow-md">
+              <Card key={s._id} className="overflow-hidden bg-white border-slate-200 hover:border-slate-300 transition-colors shadow-sm hover:shadow-md flex flex-col">
                 {/* Header: User Action & Info */}
                 <div className="p-4 flex flex-row items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-eco-500 to-emerald-400 flex items-center justify-center text-white font-bold shrink-0 shadow-inner">
@@ -91,13 +92,13 @@ export default function Feed() {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   </div>
                 ) : (
-                  <div className="w-full h-32 bg-slate-50 border-y border-slate-100 flex items-center justify-center text-slate-400 text-sm italic">
+                  <div className="w-full aspect-square sm:aspect-[4/3] bg-slate-50 border-y border-slate-100 flex items-center justify-center text-slate-400 text-sm italic">
                     No image available
                   </div>
                 )}
 
                 {/* Footer: AI Details & Badges */}
-                <div className="p-4 bg-white flex flex-wrap items-center justify-between gap-3">
+                <div className="p-4 bg-white flex flex-wrap items-center justify-between gap-3 mt-auto">
                   <div className="flex flex-wrap items-center gap-2">
                     {s.category && <CategoryBadge category={s.category} />}
                     {s.confidence != null && (
@@ -116,13 +117,15 @@ export default function Feed() {
             );
           })}
           {hasMore && (
-            <Button
-              variant="secondary"
-              disabled={isFetching}
-              onClick={() => setSkip((x) => x + PAGE)}
-            >
-              {isFetching ? 'Loading…' : 'Load more'}
-            </Button>
+            <div className="col-span-full pt-4 flex justify-center">
+              <Button
+                variant="secondary"
+                disabled={isFetching}
+                onClick={() => setSkip((x) => x + PAGE)}
+              >
+                {isFetching ? 'Loading…' : 'Load more'}
+              </Button>
+            </div>
           )}
         </div>
       )}
