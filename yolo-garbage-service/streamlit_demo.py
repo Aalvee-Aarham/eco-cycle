@@ -1,7 +1,10 @@
 """
-Minimal Streamlit UI for garbage YOLO + EcoCycle-style labels.
-Run: streamlit run streamlit_demo.py
-Weights: YOLO_WEIGHTS env, or weights/best.pt (train on garbage-classification-3); yolov8n.pt = quick COCO test only.
+Optional local-only UI for garbage YOLO (not used in production).
+
+Production default for EcoCycle is **FastAPI** (`inference_api.py` / Docker / Railway).
+Run this demo: `cd yolo-garbage-service && streamlit run streamlit_demo.py`
+
+Weights: YOLO_WEIGHTS env, or weights/best.pt; yolov8n.pt = quick COCO test only.
 """
 import os
 
@@ -12,6 +15,9 @@ from ultralytics import YOLO
 _BASE = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.environ.get("YOLO_WEIGHTS", os.path.join(_BASE, "weights", "best.pt"))
 DEVICE = os.environ.get("YOLO_DEVICE", "cpu")
+# Match Ultralytics predict defaults (same as original Streamlit app behaviour).
+_IMGSZ = int(os.environ.get("YOLO_IMGSZ", "640"))
+_IOU = float(os.environ.get("YOLO_IOU", "0.7"))
 
 # Roboflow "garbage-classification-3" material streams → EcoCycle DB categories (same spirit as server YOLOAdapter).
 # Keys are lowercased detector names. Unmatched labels fall back to "organic" (mixed / unknown waste)
@@ -106,9 +112,20 @@ def load_model():
         ) from e
 
 
-st.set_page_config(page_title="Garbage YOLO demo", layout="centered")
+st.set_page_config(
+    page_title="Garbage YOLO demo",
+    layout="centered",
+    menu_items={"Get help": None, "Report a bug": None, "About": None},
+)
+
+# Fallback if `.streamlit/config.toml` toolbarMode is ignored: hide Cloud "Deploy" chip only
+st.markdown(
+    "<style>[data-testid='stAppDeployButton']{display:none!important}</style>",
+    unsafe_allow_html=True,
+)
 
 st.title("Garbage classification (YOLO demo)")
+st.caption("Local demo only — production API is `inference_api.py` (FastAPI).")
 
 with st.expander("What the algorithm does", expanded=True):
     st.markdown(
@@ -133,12 +150,14 @@ min_conf = st.slider(
     "Confidence threshold",
     min_value=0.05,
     max_value=0.95,
-    value=float(os.environ.get("YOLO_CONF", "0.25")),
+    value=float(os.environ.get("YOLO_CONF", "0.2")),
     step=0.05,
-    help="Keep only detections with score ≥ this value (model output is 0–1).",
+    help="Ultralytics default in the original demo was 0.2 — lower keeps more boxes (higher recall).",
 )
 
-st.caption(f"Weights: `{MODEL_PATH}`  ·  device: `{DEVICE}`")
+st.caption(
+    f"Weights: `{MODEL_PATH}`  ·  device: `{DEVICE}`  ·  imgsz `{_IMGSZ}`  ·  NMS IoU `{_IOU}`"
+)
 
 uploaded = st.file_uploader("Upload one image", type=["jpg", "jpeg", "png", "webp", "bmp"])
 
@@ -148,7 +167,16 @@ if uploaded is not None:
 
 if st.button("Run detection", disabled=uploaded is None):
     model = load_model()
-    results = model(img, conf=min_conf, device=DEVICE, verbose=False)
+    results = model(
+        img,
+        conf=min_conf,
+        iou=_IOU,
+        imgsz=_IMGSZ,
+        device=DEVICE,
+        max_det=300,
+        half=False,
+        verbose=False,
+    )
     r0 = results[0]
     boxes = r0.boxes
 

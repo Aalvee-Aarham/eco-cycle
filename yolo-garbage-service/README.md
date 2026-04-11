@@ -1,89 +1,125 @@
 # yolo-garbage-service
 
-YOLOv10 (Ultralytics) inference for EcoCycle. Exposes `POST /predict` consumed by `server/classifiers/YOLOAdapter.js`.
+Inference API for EcoCycle: `POST /predict` (same JSON as [`server/classifiers/YOLOAdapter.js`](../server/classifiers/YOLOAdapter.js)).
+
+**Production Docker / Railway** uses **ONNX Runtime only** — typical **compressed image ~1.2–2.5 GB** (well **under a 4 GB** cap). **No PyTorch** in that image (PyTorch + Ultralytics usually exceeds 4 GB).
+
+**Local** Streamlit + optional **`.pt`** API still use **`requirements.txt`** (Ultralytics + torch).
+
+**Accuracy / speed:** The **slim Docker** path uses **ONNX** (no PyTorch). Small differences vs running **`best.pt` in Ultralytics** are normal (export, NMS, letterbox). For **closest match to training**, run the API with **`INFERENCE_BACKEND=torch`**, **`best.pt`**, and **`pip install -r requirements.txt`** (full PyTorch + Ultralytics — larger image than ONNX). ONNX defaults now use **NMS IoU `0.7`** and **`imgsz=640`** to align with Ultralytics `predict()`.
 
 ## Layout
 
-- `inference_api.py` — FastAPI service (production path for MERN)
-- `streamlit_demo.py` — small Streamlit UI: threshold, garbage-class → EcoCycle table, one image + “Run detection”
-- `weights/` — place `best.pt` here (not committed)
-- `notebooks/` — training notebook (optional)
+- `inference_api.py` — FastAPI (`INFERENCE_BACKEND=onnx` or `torch`)
+- `onnx_backend.py` — ONNX-only inference (used in Docker)
+- `streamlit_demo.py` — local UI (needs `.pt` + `requirements.txt`)
+- `weights/` — `best.onnx` (Docker) or `best.pt` (local / torch API)
+- `requirements-api.txt` — slim deps for Docker
+- `requirements.txt` — full stack + Streamlit
 
-## Run locally
+## Export ONNX (required for Docker / Railway)
+
+From a machine with Ultralytics installed (after training):
 
 ```bash
-cd yolo-garbage-service
-pip install -r requirements.txt
-# copy your trained weights to weights/best.pt
-set YOLO_WEIGHTS=weights\best.pt
+yolo export model=weights/best.pt format=onnx simplify=True imgsz=640
+# produces weights/best.onnx
+```
+
+**Faster inference:** use a **smaller checkpoint** when training (e.g. `yolov8n`, `yolov10n`) — smaller `.onnx` runs faster on CPU. **`imgsz=640`** is a good speed/accuracy balance; lower `imgsz` (e.g. 416) is faster but less accurate.
+
+Class names in JSON must match your dataset **class order** in `data.yaml`. Set for the API:
+
+```bash
+set YOLO_CLASS_NAMES=paper,plastic,glass,metal,cardboard,cloth
+```
+
+(or use `YOLO_CLASSES_FILE=/path/to/classes.txt` with one name per line).
+
+## Run API locally
+
+### ONNX (matches Docker)
+
+```bash
+pip install -r requirements-api.txt
+set YOLO_WEIGHTS=weights\best.onnx
+set INFERENCE_BACKEND=onnx
+set YOLO_CLASS_NAMES=paper,plastic,glass,metal,cardboard,cloth
 uvicorn inference_api:app --host 0.0.0.0 --port 8000
 ```
 
-In the Node `.env`: `CLASSIFIER=yolo` and `YOLO_API_URL=http://localhost:8000/predict`.
+### PyTorch `.pt` (no ONNX)
 
-**Streamlit demo:** `streamlit run streamlit_demo.py` — explains threshold + category mapping; use `weights/best.pt` from garbage-classification training. For a smoke test only: `set YOLO_WEIGHTS=yolov8n.pt` (COCO classes, not garbage names).
+```bash
+pip install -r requirements.txt
+set YOLO_WEIGHTS=weights\best.pt
+set INFERENCE_BACKEND=torch
+uvicorn inference_api:app --host 0.0.0.0 --port 8000
+```
 
-## Docker
+EcoCycle server: `CLASSIFIER=yolo`, `YOLO_API_URL=http://localhost:8000/predict`.
 
-Build with `best.pt` next to the Dockerfile or mount `./weights` at `/app/weights`. The image expects `/app/weights/best.pt` by default.
+**Streamlit:** `streamlit run streamlit_demo.py` — uses `.pt`; smoke test: `YOLO_WEIGHTS=yolov8n.pt`.
+
+## Docker (slim)
+
+Expect **`best.onnx`** at `/app/weights/best.onnx` (default). Image size is dominated by **`onnxruntime` + base Debian** (~1–2 GB total), not ~6 GB.
 
 ```bash
 docker build -t ecocycle-yolo .
-docker run -p 8000:8000 -v %cd%\weights:/app/weights ecocycle-yolo
+docker run -p 8000:8000 -v %cd%\weights:/app/weights -e YOLO_CLASS_NAMES=paper,plastic,glass,metal,cardboard,cloth ecocycle-yolo
 ```
+
+Place **`best.onnx`** in `./weights/` (or set `YOLO_WEIGHTS` / download via `YOLO_WEIGHTS_URL`).
 
 ## Deploy on Railway
 
-Railway runs the **Dockerfile** and sets **`PORT`**; `entrypoint.sh` starts Uvicorn on that port.
+Root directory: **`yolo-garbage-service`**.
 
-### 1. Create a service from your GitHub repo
+### Variables
 
-1. Open [Railway](https://railway.app) → **New Project** → **Deploy from GitHub repo**.
-2. Pick [`eco-cycle`](https://github.com/Aalvee-Aarham/eco-cycle) (or your fork).
-3. Add / select the service → **Settings** → **Root Directory** → set to: **`yolo-garbage-service`**  
-   (so Railway builds this folder, where the `Dockerfile` and `railway.toml` live).
+| Variable | Notes |
+|----------|--------|
+| `YOLO_WEIGHTS_URL` | HTTPS URL to **`best.onnx`** (recommended). Optional: `YOLO_WEIGHTS_FILENAME=best.onnx` if the URL has no clear filename. |
+| `YOLO_CLASS_NAMES` | Comma-separated, **same order as training** (e.g. `paper,plastic,glass,metal,cardboard,cloth`). |
+| `YOLO_CONF` | Optional, default `0.25`. |
+| `YOLO_IOU` / `YOLO_IOU_THRESHOLD` | NMS IoU — default **`0.7`** (matches Ultralytics `predict()`; we previously used `0.45` in ONNX only, which suppressed more boxes). |
+| `YOLO_IMGSZ` | Inference size, default **`640`** (must match export / training). |
+| `PORT` | Set by Railway — do not override. |
+| `ORT_NUM_THREADS` / `OMP_NUM_THREADS` | Set to your plan’s **vCPU count** (e.g. `2` or `4`) for best CPU speed. Defaults to **`2`** in the image. |
+| `OPENBLAS_NUM_THREADS` / `MKL_NUM_THREADS` | Default **`1`** in `entrypoint.sh` so BLAS does not fight ONNX Runtime threads. |
 
-### 2. Variables (Railway → Variables)
+`INFERENCE_BACKEND` defaults to **`onnx`** in the Dockerfile. Do **not** use `.pt` + torch on this slim image.
 
-| Variable | Required | Example / notes |
-|----------|----------|-----------------|
-| `PORT` | No | Railway injects this automatically — do not override unless you know you need to. |
-| `YOLO_WEIGHTS` | One of the weight options below | `/app/weights/best.pt` (default after download) or `yolov8n.pt` for a quick smoke test only. |
-| `YOLO_WEIGHTS_URL` | Recommended for real models | HTTPS URL to your **`best.pt`** (presigned S3, GitHub release asset, etc.). On boot, the container downloads it to `/app/weights/best.pt`. |
-| `YOLO_CONF` | No | `0.25` |
-| `YOLO_DEVICE` | No | `cpu` (GPU is not typical on Railway hobby tiers). |
-| `YOLO_WEIGHTS_URL` | Optional | If set, downloads `best.pt` at container start (see **Deploy on Railway**). |
+**Process model:** the container runs **one Uvicorn worker** so the ONNX model is not loaded twice into RAM (important on 512 MB–2 GB plans).
 
-**Weights:** either set **`YOLO_WEIGHTS_URL`** to a downloadable `best.pt`, or for testing set **`YOLO_WEIGHTS=yolov8n.pt`** (COCO, not garbage classes). Do not commit large `.pt` files to git.
+**Build time:** first build is often **~2–5 minutes**. **Image size:** usually **under ~2.5 GB**; verify locally with `docker images`.
 
-### 3. Networking
+**RAM:** allocate **≥ 1 GB** for stable inference; **2 GB** is comfortable for `onnxruntime` + model + FastAPI.
 
-1. **Generate Domain** (Settings → Networking) so you get `https://your-service.up.railway.app`.
-2. Your EcoCycle **Node** server needs:
+### Networking
 
-   `YOLO_API_URL=https://your-service.up.railway.app/predict`
+Generate a domain, then on the Node server:
 
-   (path must end with **`/predict`** — same as [`YOLOAdapter.js`](../server/classifiers/YOLOAdapter.js).)
+`YOLO_API_URL=https://your-service.up.railway.app/predict`
 
-### 4. Health check
-
-`railway.toml` points the healthcheck at **`GET /health`**. The first request may be slow while Ultralytics loads/downloads weights; timeout is set to **300** seconds.
-
-### 5. Cold starts & RAM
-
-YOLO + PyTorch needs enough **RAM** (often **≥ 2 GB**; more if the model is large). If the deploy crashes with OOM, upgrade the plan or use a smaller export (e.g. ONNX elsewhere — out of scope here).
-
-### 6. Verify
+### Verify
 
 ```bash
 curl -s https://YOUR-RAILWAY-URL/health
 curl -s -X POST https://YOUR-RAILWAY-URL/predict -F "image=@sample.jpg"
 ```
 
-## Environment
+## Environment reference
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `YOLO_WEIGHTS` | `./weights/best.pt` | Local path, or a **hub name** such as `yolov8n.pt` (Ultralytics downloads it on first use — handy for UI smoke tests) |
-| `YOLO_CONF` | `0.25` | Minimum confidence for boxes |
-| `YOLO_DEVICE` | `cpu` | `cpu` or `cuda:0` etc. |
+| Variable | Default (Docker) | Description |
+|----------|------------------|-------------|
+| `INFERENCE_BACKEND` | `onnx` in image | `onnx` or `torch` |
+| `YOLO_WEIGHTS` | `/app/weights/best.onnx` | Path to `.onnx` or `.pt` |
+| `YOLO_CLASS_NAMES` | — | Comma-separated labels (ONNX) |
+| `YOLO_CLASSES_FILE` | — | One class per line |
+| `YOLO_CONF` | `0.25` | Confidence threshold |
+| `YOLO_IOU` | `0.7` | NMS IoU (torch + ONNX; Ultralytics default) |
+| `YOLO_IOU_THRESHOLD` | (alias) | Same as `YOLO_IOU` for ONNX-only legacy env |
+| `YOLO_IMGSZ` | `640` | Inference image size |
+| `YOLO_DEVICE` | `cpu` | Only used for `torch` backend |

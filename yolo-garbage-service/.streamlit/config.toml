@@ -1,0 +1,7 @@
+# Hides Streamlit Cloud "Deploy" and other dev chrome for local demos.
+# https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+[client]
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
