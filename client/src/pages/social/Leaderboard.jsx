@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { PageWrapper } from '@/components/layout/PageWrapper';
 import { useLeaderboard } from '@/hooks/useLeaderboard';
 import { useSocketStore } from '@/store/socket.store';
@@ -59,7 +60,11 @@ export default function Leaderboard() {
                     <TableCell className="font-mono">
                       {rank <= 3 ? `${MEDALS[rank - 1]} ${rank}` : rank}
                     </TableCell>
-                    <TableCell className="font-medium">{u.username}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link to={`/u/${u.username}`} className="hover:text-eco-600 hover:underline">
+                        {u.username}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-right font-mono">{u.totalPoints ?? 0}</TableCell>
                     <TableCell className="text-right font-mono">{u.level ?? '—'}</TableCell>
                     <TableCell className="text-right font-mono">{formatAccuracy(u.accuracyRate)}</TableCell>
