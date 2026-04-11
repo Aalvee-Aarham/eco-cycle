@@ -5,6 +5,7 @@ import { AuditService } from './AuditService.js';
 import { RewardService } from './RewardService.js';
 import { DisputeService } from './DisputeService.js';
 import { computePHash } from '../utils/phash.js';
+import { UploadService } from './UploadService.js';
 import Submission from '../models/Submission.js';
 
 export const ClassificationService = {
@@ -15,10 +16,19 @@ export const ClassificationService = {
     const pHash = await computePHash(imageBuffer);
     const isFraud = await FraudService.check(userId, pHash);
 
-    // 2. Create submission in PENDING state
+    // 2. Upload to Cloudinary & Create submission in PENDING state
+    let imageUrl = '';
+    try {
+      imageUrl = await UploadService.uploadImage(imageBuffer);
+    } catch (err) {
+      console.error('Cloudinary upload failed:', err.message);
+      // Fallback: we could still proceed without an image, but let's log it
+    }
+
     const sub = await Submission.create({
       user: userId,
       pHash,
+      imageUrl,
       state: 'PENDING',
       idempotencyKey,
     });
