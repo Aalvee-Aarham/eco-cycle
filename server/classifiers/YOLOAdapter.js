@@ -24,7 +24,6 @@ const LABEL_MAP = {
   cloth: 'recyclable',
   clothes: 'recyclable',
   textile: 'recyclable',
-  // common variants / typos from similar datasets
   palstic: 'recyclable',
   carboard: 'recyclable',
   trash: 'organic',
@@ -35,7 +34,6 @@ const LABEL_MAP = {
   vegetable: 'organic',
   fruit_peel: 'organic',
   compost: 'organic',
-  // detailed labels
   plastic_bottle: 'recyclable',
   glass_bottle: 'recyclable',
   metal_can: 'recyclable',

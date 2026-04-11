@@ -1,35 +1,30 @@
-import { getRedis } from '../config/redis.js';
 import { hammingDistance } from '../utils/phash.js';
 import { getConfig } from '../config/system.config.js';
+import Submission from '../models/Submission.js';
 
 export const FraudService = {
   async check(userId, pHash) {
     const config = getConfig();
-    const redis = getRedis();
-    const windowSeconds = config.FRAUD_WINDOW_MINUTES * 60;
-    const key = `fraud:${userId}`;
+    const threshold = config.PHASH_HAMMING_THRESHOLD;
 
-    if (redis.status !== 'ready') {
-      return false;
-    }
-
+    // MongoDB-based duplicate detection — reliable, no Redis dependency.
+    // Fetch all non-flagged submissions for this user that have a stored pHash
+    // and compare via perceptual Hamming distance.
     try {
-      // Get recent hashes for this user
-      const recentHashes = await redis.lrange(key, 0, -1);
+      const existing = await Submission.find(
+        { user: userId, pHash: { $exists: true, $ne: '' }, state: { $nin: ['FLAGGED'] } },
+        { pHash: 1 },
+        { lean: true }
+      ).limit(100);
 
-      for (const stored of recentHashes) {
-        const dist = hammingDistance(pHash, stored);
-        if (dist < config.PHASH_HAMMING_THRESHOLD) {
+      for (const sub of existing) {
+        const dist = hammingDistance(pHash, sub.pHash);
+        if (dist < threshold) {
           return true; // Duplicate detected
         }
       }
-
-      // Store new hash with window TTL
-      await redis.lpush(key, pHash);
-      await redis.expire(key, windowSeconds);
-      await redis.ltrim(key, 0, 49); // Keep last 50
     } catch (err) {
-      console.warn('FraudService: Redis call failed, skipping fraud detection check.');
+      console.warn('FraudService: MongoDB pHash check failed:', err.message);
     }
 
     return false;
