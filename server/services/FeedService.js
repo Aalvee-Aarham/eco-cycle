@@ -15,7 +15,7 @@ export const FeedService = {
       .skip(skip)
       .limit(limit)
       // Spec: feed must include category, confidence score, points awarded
-      .select('user category subcategory confidence points state createdAt classifier')
+      .select('user category subcategory confidence points state createdAt classifier imageUrl')
       .populate('user', 'username avatar isPrivate totalPoints communityRank')
       .lean();
 
