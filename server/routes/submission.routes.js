@@ -90,4 +90,19 @@ router.post('/:id/redeem', auth, requireRole('citizen'), async (req, res, next) 
   }
 });
 
+// DELETE /api/submissions/:id
+router.delete('/:id', auth, requireRole('administrator'), async (req, res, next) => {
+  try {
+    const sub = await Submission.findByIdAndDelete(req.params.id);
+    if (!sub) return res.status(404).json({ error: 'Submission not found' });
+    
+    // Attempt to update total points / remove points if they were rewarded, but this might be complex.
+    // For now, hard delete is requested.
+    
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

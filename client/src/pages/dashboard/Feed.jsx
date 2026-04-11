@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Trash2 } from 'lucide-react';
 import { PageWrapper } from '@/components/layout/PageWrapper';
 import { useFeed } from '@/hooks/useSocial';
 import { CategoryBadge } from '@/components/CategoryBadge';
@@ -10,15 +13,32 @@ import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Card } from '@/components/ui/Card';
 import { assetUrl } from '@/lib/utils';
+import { useAuthStore } from '@/store/auth.store';
+import { submissionsApi } from '@/api/submissions.api';
 
 const PAGE = 15;
 
 export default function Feed() {
   const [skip, setSkip] = useState(0);
   const { data, isLoading, isFetching } = useFeed({ limit: PAGE, skip });
+  const { user: currentUser } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const isAdmin = currentUser?.role === 'administrator';
 
   const items = Array.isArray(data) ? data : [];
   const hasMore = items.length === PAGE;
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to permanently delete this submission?')) return;
+    try {
+      await submissionsApi.delete(id);
+      toast.success('Submission deleted');
+      queryClient.invalidateQueries(['feed']);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to delete submission');
+    }
+  };
 
   return (
     <PageWrapper>
@@ -78,6 +98,15 @@ export default function Feed() {
                     <div className="shrink-0">
                       <PointsChip points={s.points} />
                     </div>
+                  )}
+                  {isAdmin && (
+                    <button 
+                      onClick={() => handleDelete(s._id)} 
+                      className="text-red-400 hover:text-red-600 transition-colors ml-1 p-1.5 rounded-full hover:bg-red-50 focus:outline-none"
+                      title="Permanently remove from database"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   )}
                 </div>
 
