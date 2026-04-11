@@ -18,7 +18,9 @@ EcoCycle is built on a service-oriented architecture designed for high throughpu
 - **Frontend**: React 18 (Vite) with **Tailwind CSS** for a premium UI and **Framer Motion** for micro-animations.
 - **Backend**: Node.js & Express with a dedicated **Service Layer** pattern to separate business logic from API routing.
 - **Database**: MongoDB (Mongoose) for document storage and **Redis** for non-blocking caching of leaderboards and fraud detection windows.
-- **AI Engine**: Integrated with **Google Gemini 2.0 Flash** for multimodal (image + text) classification. Optional **YOLO** path: run [`yolo-garbage-service`](./yolo-garbage-service/README.md) and set `CLASSIFIER=yolo` on the server.
+- **AI Engine**: 
+  - **Google Gemini 2.0 Flash**: Primary multimodal AI for rapid image classification and intent-checking.
+  - **YOLOv10 (Custom Trained)**: Included as an optional local microservice (`yolo-garbage-service`). We trained a custom YOLOv10 model on our proprietary dataset and converted it to **ONNX Runtime** to enable ultra-fast, lightweight CPU inference (<1.5GB Docker footprint vs 6GB PyTorch). Run it locally or deploy it to Railway and set `CLASSIFIER=yolo` on the Node server.
 
 ### **System Diagram**
 ```mermaid
