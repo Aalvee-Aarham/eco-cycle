@@ -5,7 +5,7 @@ EcoCycle is a full-stack (MERN) platform that leverages **Artificial Intelligenc
 ---
 
 ## 🚀 Quick Links
-- **Live Platform**: [https://ecocycle-teamdelelu.vercel.app](https://ecocycle-teamdelelu.vercel.app)
+- **Live Platform**: [https://eco-cycle-client-red.vercel.app](https://eco-cycle-client-red.vercel.app)
 - **GitHub Repository**: [https://github.com/Aalvee-Aarham/eco-cycle](https://github.com/Aalvee-Aarham/eco-cycle)
 
 ---
