@@ -94,10 +94,6 @@ npm run dev
 
 ---
 
-## 🛣️ Roadmap
-- [ ] Mobile App (React Native) integration.
-- [ ] Offline-first classification using TensorFlow.js.
-- [ ] Integration with municipal waste collection schedules.
-
 ---
-*Developed by Aalvee-Aarham for the Global Hackathon. 🌍*
+*Developed by Team-delelu for the Aust cse carnival 7.0 - Hackathon. 🌍*
+
