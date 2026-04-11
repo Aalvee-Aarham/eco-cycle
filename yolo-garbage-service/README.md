@@ -4,9 +4,9 @@ Inference API for EcoCycle: `POST /predict` (same JSON as [`server/classifiers/Y
 
 **Production Docker / Railway** uses **ONNX Runtime only** — typical **compressed image ~1.2–2.5 GB** (well **under a 4 GB** cap). **No PyTorch** in that image (PyTorch + Ultralytics usually exceeds 4 GB).
 
-**Local** Streamlit + optional **`.pt`** API still use **`requirements.txt`** (Ultralytics + torch).
+**Local** Streamlit + optional **`.pt`** API still use **`requirements-dev.txt`** (Ultralytics + torch).
 
-**Accuracy / speed:** The **slim Docker** path uses **ONNX** (no PyTorch). Small differences vs running **`best.pt` in Ultralytics** are normal (export, NMS, letterbox). For **closest match to training**, run the API with **`INFERENCE_BACKEND=torch`**, **`best.pt`**, and **`pip install -r requirements.txt`** (full PyTorch + Ultralytics — larger image than ONNX). ONNX defaults now use **NMS IoU `0.7`** and **`imgsz=640`** to align with Ultralytics `predict()`.
+**Accuracy / speed:** The **slim Docker** path uses **ONNX** (no PyTorch). Small differences vs running **`best.pt` in Ultralytics** are normal (export, NMS, letterbox). For **closest match to training**, run the API with **`INFERENCE_BACKEND=torch`**, **`best.pt`**, and **`pip install -r requirements-dev.txt`** (full PyTorch + Ultralytics — larger image than ONNX). ONNX defaults now use **NMS IoU `0.7`** and **`imgsz=640`** to align with Ultralytics `predict()`.
 
 ## Layout
 
