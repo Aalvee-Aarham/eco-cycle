@@ -62,7 +62,7 @@ export function usePrivacy() {
       qc.invalidateQueries({ queryKey: ['me'] });
       qc.invalidateQueries({ queryKey: ['profile'] });
     },
-    onError: (err) => toast.error(err.response?.data?.error),
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed to update privacy'),
   });
 }
 

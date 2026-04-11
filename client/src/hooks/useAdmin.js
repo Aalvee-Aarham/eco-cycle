@@ -22,7 +22,7 @@ export function useChangeRole() {
       toast.success('Role updated');
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
-    onError: (err) => toast.error(err.response?.data?.error),
+    onError: (err) => toast.error(err.response?.data?.error || 'Role update failed'),
   });
 }
 
@@ -34,5 +34,6 @@ export function useSetConfig() {
       toast.success('Config saved');
       qc.invalidateQueries({ queryKey: ['admin', 'config'] });
     },
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed to save config'),
   });
 }

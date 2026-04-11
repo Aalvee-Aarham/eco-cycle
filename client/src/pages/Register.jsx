@@ -42,6 +42,11 @@ export default function Register() {
           <CardDescription>Choose a username, email, and password</CardDescription>
         </CardHeader>
         <CardContent>
+          {reg.isError && (
+            <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-600">
+              {reg.error.response?.data?.error || 'Registration failed. Please try again.'}
+            </div>
+          )}
           <form onSubmit={handleSubmit((data) => reg.mutate(data))} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Username</Label>

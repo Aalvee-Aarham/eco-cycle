@@ -12,7 +12,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && !['/login', '/register'].some(p => window.location.pathname.includes(p))) {
       useAuthStore.getState().logout();
       window.location.href = '/login';
     }

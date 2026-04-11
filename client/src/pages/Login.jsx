@@ -41,6 +41,11 @@ export default function Login() {
           <CardDescription>Enter your email and password</CardDescription>
         </CardHeader>
         <CardContent>
+          {login.isError && (
+            <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-600">
+              {login.error.response?.data?.error || 'Invalid credentials. Please try again.'}
+            </div>
+          )}
           <form onSubmit={handleSubmit((data) => login.mutate(data))} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
