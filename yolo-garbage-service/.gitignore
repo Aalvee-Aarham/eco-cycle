@@ -1,5 +1,7 @@
 weights/*.pt
 weights/*.onnx
+/yolov8n.pt
+*.pt
 __pycache__/
 .venv/
 venv/
