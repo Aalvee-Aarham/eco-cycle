@@ -138,71 +138,90 @@ export default function Classify() {
         {result && submission && (
           <Card className="overflow-hidden">
             <CardContent className="p-6 space-y-4">
-              <div className="flex flex-col sm:flex-row gap-6 items-start">
-                {imgSrc && (
-                  <img src={imgSrc} alt="" className="w-full sm:w-40 h-40 object-cover rounded-lg border" />
-                )}
-                <ConfidenceMeter value={submission.confidence} />
-              </div>
+              {flagged ? (
+                /* ── Duplicate rejected ── */
+                <>
+                  {imgSrc && (
+                    <img src={imgSrc} alt="" className="w-full sm:w-40 h-40 object-cover rounded-lg border mx-auto" />
+                  )}
+                  <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3">
+                    <p className="font-semibold mb-1">Duplicate detected — submission rejected</p>
+                    <p className="text-red-600">
+                      This image has already been submitted and rewarded. Resubmitting the same image does not earn additional points.
+                      {submission.flagReason ? ` (${submission.flagReason})` : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <Button variant="outline" onClick={reset}>
+                      Classify another
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                /* ── Normal result ── */
+                <>
+                  <div className="flex flex-col sm:flex-row gap-6 items-start">
+                    {imgSrc && (
+                      <img src={imgSrc} alt="" className="w-full sm:w-40 h-40 object-cover rounded-lg border" />
+                    )}
+                    <ConfidenceMeter value={submission.confidence} />
+                  </div>
 
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-slate-500">Category:</span>
-                  {submission.category ? <CategoryBadge category={submission.category} /> : '—'}
-                </div>
-                {submission.subcategory && (
-                  <p className="text-sm">
-                    <span className="text-slate-500">Subcategory:</span> {submission.subcategory}
-                  </p>
-                )}
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-slate-500">State:</span>
-                  <StateBadge state={submission.state} />
-                </div>
-                {submission.classifier && (
-                  <p className="text-xs text-slate-400">Classifier: {submission.classifier}</p>
-                )}
-              </div>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-slate-500">Category:</span>
+                      {submission.category ? <CategoryBadge category={submission.category} /> : '—'}
+                    </div>
+                    {submission.subcategory && (
+                      <p className="text-sm">
+                        <span className="text-slate-500">Subcategory:</span> {submission.subcategory}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-slate-500">State:</span>
+                      <StateBadge state={submission.state} />
+                    </div>
+                    {submission.classifier && (
+                      <p className="text-xs text-slate-400">Classifier: {submission.classifier}</p>
+                    )}
+                  </div>
 
-              {submission.reasoning && (
-                <div className="border rounded-lg">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between p-3 text-sm font-medium text-slate-700"
-                    onClick={() => setReasonOpen(!reasonOpen)}
-                  >
-                    AI reasoning
-                    {reasonOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-                  {reasonOpen && (
-                    <div className="px-3 pb-3 text-sm text-slate-600 border-t bg-slate-50/80">
-                      {submission.reasoning}
+                  {submission.reasoning && (
+                    <div className="border rounded-lg">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between p-3 text-sm font-medium text-slate-700"
+                        onClick={() => setReasonOpen(!reasonOpen)}
+                      >
+                        AI reasoning
+                        {reasonOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+                      {reasonOpen && (
+                        <div className="px-3 pb-3 text-sm text-slate-600 border-t bg-slate-50/80">
+                          {submission.reasoning}
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {submission.state === 'IN_DISPUTE' && (
-                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                  Low confidence — sent to dispute queue for review.
-                </p>
-              )}
-              {flagged && (
-                <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                  Duplicate detected — submission flagged{submission.flagReason ? `: ${submission.flagReason}` : ''}.
-                </p>
-              )}
+                  {submission.state === 'IN_DISPUTE' && (
+                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                      Low confidence — sent to dispute queue for review.
+                    </p>
+                  )}
 
-              <div className="flex flex-wrap gap-2 pt-2">
-                {(submission.state === 'AWAITING_REWARD' || submission.state === 'REWARDED') && (
-                  <Button asChild>
-                    <Link to={`/submissions/${submission._id}`}>Redeem / view</Link>
-                  </Button>
-                )}
-                <Button variant="outline" onClick={reset}>
-                  Classify another
-                </Button>
-              </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    {(submission.state === 'AWAITING_REWARD' || submission.state === 'REWARDED') && (
+                      <Button asChild>
+                        <Link to={`/submissions/${submission._id}`}>Redeem / view</Link>
+                      </Button>
+                    )}
+                    <Button variant="outline" onClick={reset}>
+                      Classify another
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
