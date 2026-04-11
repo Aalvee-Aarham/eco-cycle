@@ -33,8 +33,34 @@ submissionSchema.index({ user: 1, createdAt: -1 });
 submissionSchema.index({ state: 1 });
 submissionSchema.index({ pHash: 1 });
 
+submissionSchema.pre('save', function (next) {
+  if (this.isModified('state') && !this.isNew) {
+    const from = this._originalState || this.get('state', null, { getters: false });
+    // Note: this.get('state') would give the target state.
+    // We need to track the original state.
+    // However, since we use the .transition() method, it's already covered.
+    // To make it truly robust against manual .save(), we use a virtual or init hook.
+  }
+  next();
+});
+
+// Capture original state on load
+submissionSchema.post('init', function (doc) {
+  doc._originalState = doc.state;
+});
+
+submissionSchema.pre('save', function (next) {
+  if (this.isModified('state') && !this.isNew && this._originalState) {
+    try {
+      assertValidTransition(this._originalState, this.state);
+    } catch (err) {
+      return next(err);
+    }
+  }
+  next();
+});
+
 submissionSchema.methods.transition = async function (newState) {
-  assertValidTransition(this.state, newState);
   this.state = newState;
   await this.save();
   return this;
