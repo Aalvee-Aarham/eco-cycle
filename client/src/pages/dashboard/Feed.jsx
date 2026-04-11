@@ -45,45 +45,72 @@ export default function Feed() {
           {items.map((s) => {
             const u = s.user;
             const uname = typeof u === 'object' && u?.username ? u.username : 'user';
+            
+            // Format natural language category string
+            let itemDesc = 'an item';
+            if (s.subcategory) {
+              itemDesc = s.subcategory.replace('_', ' ');
+            } else if (s.category) {
+              itemDesc = s.category === 'e-waste' ? 'e-waste' : `a ${s.category} item`;
+            }
+
             return (
-              <Card key={s._id} className="overflow-hidden bg-white shadow-sm hover:shadow transition-shadow">
-                {/* Header: User Info */}
-                <div className="p-4 flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-eco-100 flex items-center justify-center text-eco-700 font-bold shrink-0">
+              <Card key={s._id} className="overflow-hidden bg-white border-slate-200 hover:border-slate-300 transition-colors shadow-sm hover:shadow-md">
+                {/* Header: User Action & Info */}
+                <div className="p-4 flex flex-row items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-eco-500 to-emerald-400 flex items-center justify-center text-white font-bold shrink-0 shadow-inner">
                     {uname[0]?.toUpperCase()}
                   </div>
-                  <div>
-                    <Link to={`/u/${uname}`} className="font-medium text-slate-900 hover:text-eco-600">
-                      @{uname}
-                    </Link>
-                    <p className="text-xs text-slate-500">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm truncate">
+                      <Link to={`/u/${uname}`} className="font-bold text-slate-900 hover:text-eco-600">
+                        {uname}
+                      </Link>
+                      <span className="text-slate-500 mx-1">recycled</span>
+                      <span className="font-medium text-slate-800">{itemDesc}</span>
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5 font-medium">
                       {s.createdAt ? formatDistanceToNow(new Date(s.createdAt), { addSuffix: true }) : ''}
                     </p>
                   </div>
+                  {s.points > 0 && (
+                    <div className="shrink-0">
+                      <PointsChip points={s.points} />
+                    </div>
+                  )}
                 </div>
 
-                {/* Body: Image */}
-                {s.imageUrl && (
-                  <div className="w-full aspect-video bg-slate-50 overflow-hidden max-h-[400px]">
+                {/* Body: Image with hover effect */}
+                {s.imageUrl ? (
+                  <div className="w-full aspect-square sm:aspect-[4/3] bg-slate-100 relative group overflow-hidden border-y border-slate-100">
                     <img 
                       src={assetUrl(s.imageUrl)} 
                       alt="Waste submission" 
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                     />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </div>
+                ) : (
+                  <div className="w-full h-32 bg-slate-50 border-y border-slate-100 flex items-center justify-center text-slate-400 text-sm italic">
+                    No image available
                   </div>
                 )}
 
-                {/* Footer: Details & Points */}
-                <div className="p-4 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between gap-4">
+                {/* Footer: AI Details & Badges */}
+                <div className="p-4 bg-white flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
                     {s.category && <CategoryBadge category={s.category} />}
                     {s.confidence != null && (
-                      <span className="text-xs font-mono text-slate-500 bg-white px-2 py-1 rounded-md border border-slate-200 shadow-sm">
-                        {Math.round(s.confidence * 100)}% Match
+                      <span className="text-xs font-mono text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-200">
+                        {Math.round(s.confidence * 100)}% match
                       </span>
                     )}
                   </div>
-                  {s.points > 0 && <PointsChip points={s.points} />}
+                  {s.classifier && (
+                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                       {s.classifier}
+                     </span>
+                  )}
                 </div>
               </Card>
             );
