@@ -15,4 +15,6 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://aalveeaarham2003:$HF_TOKEN@huggingface.co/spaces/aalveeaarham2003/ecocycle-api main
+        run: |
+          git lfs install
+          git push --force https://aalveeaarham2003:$HF_TOKEN@huggingface.co/spaces/aalveeaarham2003/ecocycle-api main
