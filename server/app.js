@@ -24,10 +24,32 @@ app.use(
   })
 );
 
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  credentials: true,
-}));
+const getAllowedOrigins = () => {
+  const origins = process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(',').map((url) => url.trim().replace(/\/$/, ''))
+    : [];
+  return [...origins, 'http://localhost:5173'];
+};
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+
+      const allowedOrigins = getAllowedOrigins();
+      const normalizedOrigin = origin.replace(/\/$/, '');
+
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        callback(null, true);
+      } else {
+        console.warn(`Blocked by CORS: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
