@@ -19,6 +19,8 @@ jobs:
           git lfs install
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
+          # Rename the specially named Dockerfile back to standard name for HF
+          mv Dockerfile.huggingface Dockerfile
           # Create an orphan branch to wipe history
           git checkout --orphan latest_branch
           git add -A
