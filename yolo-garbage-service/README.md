@@ -123,3 +123,59 @@ curl -s -X POST https://YOUR-RAILWAY-URL/predict -F "image=@sample.jpg"
 | `YOLO_IOU_THRESHOLD` | (alias) | Same as `YOLO_IOU` for ONNX-only legacy env |
 | `YOLO_IMGSZ` | `640` | Inference image size |
 | `YOLO_DEVICE` | `cpu` | Only used for `torch` backend |
+
+## Deploy on Hugging Face Spaces
+
+**Recommended for production** with fast, free inference.
+
+### 1. Create a Space
+
+- Go to https://huggingface.co/spaces/create
+- Choose **Docker** as SDK
+- Set **Visibility** to Public (for API access)
+
+### 2. Configure Secrets
+
+In Space settings → **Secrets**, add:
+
+```
+PORT=7860
+INFERENCE_BACKEND=torch
+YOLO_WEIGHTS=weights/best.pt
+YOLO_CLASS_NAMES=paper,plastic,glass,metal,cardboard,cloth
+ALLOWED_ORIGINS=*
+```
+
+### 3. Link Repository
+
+Option A: Direct sync with this repo
+Option B: Upload `Dockerfile` and `requirements-api.txt` manually
+
+### 4. Deploy
+
+HF Spaces will:
+1. Clone and build from `Dockerfile`
+2. Start the API on port **7860**
+3. Provide your public URL: `https://<username>-<space-name>.hf.space`
+
+### 5. Update Server
+
+Update **EcoCycle Server** environment variable:
+
+```
+YOLO_API_URL=https://<username>-<space-name>.hf.space/detect
+```
+
+### 6. Test
+
+```bash
+# Check health
+curl https://<username>-<space-name>.hf.space/health
+
+# Submit image for detection
+curl -X POST https://<username>-<space-name>.hf.space/detect \
+  -F "file=@image.jpg" \
+  -F "conf=0.25"
+```
+
+**Note:** First request may take **10–30 seconds** (HF Spaces cold starts); subsequent requests are fast (~1–3 sec).

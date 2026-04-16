@@ -1,5 +1,5 @@
 import { AdapterFactory } from '../classifiers/AdapterFactory.js';
-import { getConfig } from '../config/system.config.js';
+import { getConfig, getSecondaryClassifier, LOW_CONF_LIMIT } from '../config/system.config.js';
 import { FraudService } from './FraudService.js';
 import { AuditService } from './AuditService.js';
 import { RewardService } from './RewardService.js';
@@ -7,6 +7,18 @@ import { DisputeService } from './DisputeService.js';
 import { computePHash } from '../utils/phash.js';
 import { UploadService } from './UploadService.js';
 import Submission from '../models/Submission.js';
+
+/**
+ * Derives the confidence tier label from a raw score.
+ * @param {number} confidence
+ * @param {number} highThreshold  admin-configured high threshold (default 0.73)
+ * @returns {'high'|'medium'|'low'}
+ */
+function getTier(confidence, highThreshold) {
+  if (confidence >= highThreshold) return 'high';
+  if (confidence >= LOW_CONF_LIMIT) return 'medium';
+  return 'low';
+}
 
 export const ClassificationService = {
   async classify(userId, imageBuffer, mimeType, classifierOverride, idempotencyKey) {
@@ -22,7 +34,6 @@ export const ClassificationService = {
       imageUrl = await UploadService.uploadImage(imageBuffer);
     } catch (err) {
       console.error('Cloudinary upload failed:', err.message);
-      // Fallback: we could still proceed without an image, but let's log it
     }
 
     const sub = await Submission.create({
@@ -33,7 +44,6 @@ export const ClassificationService = {
       idempotencyKey,
     });
 
-    // Spec: every event must be audit logged as part of the same operation
     await AuditService.write(
       'SUBMISSION_CREATED',
       { submissionId: sub._id, pHash: pHash.slice(0, 8) + '...', classifier: classifierOverride || config.PRIMARY_CLASSIFIER },
@@ -42,11 +52,10 @@ export const ClassificationService = {
       'Submission'
     );
 
-    // 3. Fraud path — flag and audit, no points
+    // 3. Fraud path — flag immediately, no points
     if (isFraud) {
       sub.flagReason = 'DUPLICATE_IMAGE';
       await sub.transition('FLAGGED');
-      // Spec: flagged submissions recorded in audit trail
       await AuditService.write(
         'FRAUD_FLAGGED',
         { submissionId: sub._id, reason: 'DUPLICATE_IMAGE', pHash },
@@ -58,28 +67,37 @@ export const ClassificationService = {
     }
 
     // 4. Classify with primary adapter
-    const adapterName = classifierOverride || config.PRIMARY_CLASSIFIER;
+    const primaryName = classifierOverride || config.PRIMARY_CLASSIFIER;
     let result;
     try {
-      const adapter = AdapterFactory.get(adapterName);
+      const adapter = AdapterFactory.get(primaryName);
       result = await adapter.classify(imageBuffer, mimeType);
     } catch (err) {
-      // Fallback to mock on primary failure — still audit it
-      console.error(`Primary classifier ${adapterName} failed:`, err.message);
-      const mock = AdapterFactory.get('mock');
-      result = await mock.classify(imageBuffer, mimeType);
-      result.rawResponse = { ...result.rawResponse, fallback: true, originalError: err.message };
-      await AuditService.write('CLASSIFIER_FALLBACK', { adapterName, error: err.message }, userId, sub._id, 'Submission');
+      // Primary failed — re-throw (no mock fallback)
+      console.error(`Primary classifier ${primaryName} failed:`, err.message);
+      await AuditService.write('CLASSIFIER_FAILED', { classifier: primaryName, error: err.message }, userId, sub._id, 'Submission');
+      throw err;
     }
 
     sub.category = result.category;
     sub.subcategory = result.subcategory;
     sub.confidence = result.confidence;
-    sub.classifier = adapterName;
+    sub.classifier = primaryName;
     sub.reasoning = result.rawResponse?.reasoning || '';
+    sub.confidenceTier = getTier(result.confidence, config.HIGH_CONF_THRESHOLD);
+
+    // If YOLO returned a base64 annotated image, upload to Cloudinary
+    if (result.rawResponse?.detected_image) {
+      try {
+        const dUrl = await UploadService.uploadBase64(result.rawResponse.detected_image);
+        if (dUrl) sub.detectedImageUrl = dUrl;
+      } catch (err) {
+        console.error('Cloudinary detected-image upload failed:', err.message);
+      }
+    }
+
     await sub.save();
 
-    // Spec: classification decisions must be audit logged
     await AuditService.write(
       'CLASSIFICATION_DECISION',
       {
@@ -87,7 +105,8 @@ export const ClassificationService = {
         category: result.category,
         subcategory: result.subcategory,
         confidence: result.confidence,
-        classifier: adapterName,
+        confidenceTier: sub.confidenceTier,
+        classifier: primaryName,
         reasoning: result.rawResponse?.reasoning,
       },
       userId,
@@ -95,27 +114,42 @@ export const ClassificationService = {
       'Submission'
     );
 
-    // 5. Route by confidence threshold
-    if (result.confidence >= config.CONFIDENCE_THRESHOLD) {
-      // High-confidence path — direct to reward
+    // 5. Route by confidence tier
+    if (sub.confidenceTier === 'high') {
+      // ── HIGH: direct to reward ────────────────────────────────────────────
       await sub.transition('CLASSIFIED');
       await AuditService.write('STATE_TRANSITION', { from: 'PENDING', to: 'CLASSIFIED', submissionId: sub._id }, userId, sub._id, 'Submission');
 
       await sub.transition('AWAITING_REWARD');
       await AuditService.write('STATE_TRANSITION', { from: 'CLASSIFIED', to: 'AWAITING_REWARD', submissionId: sub._id }, userId, sub._id, 'Submission');
 
-      // RewardService internally transitions to REWARDED and writes REWARD_AWARDED audit
       await RewardService.award(sub);
-    } else {
-      // Low-confidence path — dispute resolution
-      await sub.transition('IN_DISPUTE');
-      await AuditService.write('STATE_TRANSITION', { from: 'PENDING', to: 'IN_DISPUTE', submissionId: sub._id, confidence: result.confidence }, userId, sub._id, 'Submission');
 
-      // Spec: dispute resolution < 1 second from initial low-confidence result
-      // DisputeService runs secondary classifier and records outcome
-      await DisputeService.resolve(sub, imageBuffer, mimeType);
+    } else {
+      // ── MEDIUM or LOW: run secondary model to attempt auto-resolution ──
+      // Transition to IN_DISPUTE as the initial state
+      await sub.transition('IN_DISPUTE');
+      await AuditService.write(
+        'STATE_TRANSITION',
+        { from: 'PENDING', to: 'IN_DISPUTE', reason: `${sub.confidenceTier.toUpperCase()}_CONFIDENCE`, confidence: result.confidence, submissionId: sub._id },
+        userId,
+        sub._id,
+        'Submission'
+      );
+
+      // If secondary classifier is enabled, run it
+      if (!config.DISABLE_SECONDARY_CLASSIFIER) {
+        const secondaryName = getSecondaryClassifier(primaryName);
+        await DisputeService.resolve(sub, imageBuffer, mimeType, secondaryName, config);
+      } else {
+        console.log('[ClassificationService] Secondary classifier disabled, skipping resolution attempt');
+      }
     }
 
-    return { submission: sub, flagged: false };
+    return {
+      submission: sub,
+      flagged: false,
+      raw: result.rawResponse,
+    };
   },
 };

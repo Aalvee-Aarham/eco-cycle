@@ -3,13 +3,22 @@ import { ClassifierAdapter } from './ClassifierAdapter.js';
 
 const VALID_CATEGORIES = ['recyclable', 'organic', 'e-waste', 'hazardous'];
 
-const SYSTEM_PROMPT = `Fast waste classifier. 
-1. If primary subject is NOT waste (e.g. person, animal, scenery), classify any visible waste but force confidence < 0.72.
-2. If primary subject IS waste, set confidence > 0.85.
+const SYSTEM_PROMPT = `You are a precise waste classifier for the EcoCycle platform.
 
-Categories: recyclable (paper, plastic, glass, metal, cardboard), organic (food_waste, garden_waste), e-waste (battery, cable, device, appliance), hazardous (chemical, medical, paint, aerosol)
+Categories:
+- recyclable: paper, plastic, glass, metal, cardboard, bottles, cans, cloth
+- organic: food waste, garden waste, biodegradable material
+- e-waste: batteries, cables, phones, laptops, TVs, appliances, electronics
+- hazardous: chemicals, paint, aerosols, syringes, medical waste
 
-Output ONLY valid JSON: {"category":"...","subcategory":"...","confidence":0.0}`;
+Rules:
+1. If the primary subject is NOT waste (person, animal, scenery), classify any visible waste but set confidence below 0.20.
+2. If the primary subject IS clearly waste, set confidence above 0.85.
+3. For ambiguous or mixed waste, set confidence between 0.20 and 0.72.
+4. Always include a brief reasoning explaining your classification decision.
+
+Output ONLY valid JSON (no markdown fences):
+{"category":"...","subcategory":"...","confidence":0.0,"reasoning":"..."}`;
 
 /** Default matches Google Generative Language API "Flash" family (override with GEMINI_MODEL). */
 const DEFAULT_MODEL = 'gemini-2.0-flash';
@@ -19,7 +28,7 @@ export class GeminiAdapter extends ClassifierAdapter {
     super();
     const key = process.env.GEMINI_API_KEY;
     if (!key) {
-      throw new Error('GEMINI_API_KEY is required when CLASSIFIER=gemini');
+      throw new Error('GEMINI_API_KEY is required when using the Gemini classifier');
     }
     this.genai = new GoogleGenerativeAI(key);
     const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
@@ -27,11 +36,13 @@ export class GeminiAdapter extends ClassifierAdapter {
   }
 
   async classify(imageBuffer, mimeType) {
+    console.log('[GeminiAdapter] Classifying image...');
     const result = await this.model.generateContent([
       { text: SYSTEM_PROMPT },
       { inlineData: { mimeType, data: imageBuffer.toString('base64') } },
     ]);
     const text = result.response.text();
+    // Strip any accidental markdown fences
     const cleaned = text.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
 
@@ -43,7 +54,10 @@ export class GeminiAdapter extends ClassifierAdapter {
       category,
       subcategory: parsed.subcategory || null,
       confidence: Math.min(1, Math.max(0, Number(parsed.confidence))),
-      rawResponse: parsed,
+      rawResponse: {
+        ...parsed,
+        reasoning: parsed.reasoning || '',
+      },
     };
   }
 }

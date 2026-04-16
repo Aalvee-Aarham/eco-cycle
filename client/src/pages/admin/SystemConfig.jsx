@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/Button';
 import { Label } from '@/components/ui/Label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Switch } from '@/components/ui/Switch';
 
 const KEYS = {
   confidence: 'CONFIDENCE_THRESHOLD',
   fraud: 'FRAUD_WINDOW_MINUTES',
   classifier: 'PRIMARY_CLASSIFIER',
+  disableFraud: 'DISABLE_FRAUD_CHECK',
+  disableSecondary: 'DISABLE_SECONDARY_CLASSIFIER',
 };
 
 export default function SystemConfig() {
@@ -19,12 +22,16 @@ export default function SystemConfig() {
   const [threshold, setThreshold] = useState(0.72);
   const [fraudMins, setFraudMins] = useState(60);
   const [classifier, setClassifier] = useState('gemini');
+  const [disableFraud, setDisableFraud] = useState(false);
+  const [disableSecondary, setDisableSecondary] = useState(false);
 
   useEffect(() => {
     if (!config) return;
     if (config[KEYS.confidence] != null) setThreshold(Number(config[KEYS.confidence]));
     if (config[KEYS.fraud] != null) setFraudMins(Number(config[KEYS.fraud]));
     if (config[KEYS.classifier] != null) setClassifier(String(config[KEYS.classifier]));
+    if (config[KEYS.disableFraud] != null) setDisableFraud(Boolean(config[KEYS.disableFraud]));
+    if (config[KEYS.disableSecondary] != null) setDisableSecondary(Boolean(config[KEYS.disableSecondary]));
   }, [config]);
 
   return (
@@ -110,6 +117,66 @@ export default function SystemConfig() {
                 disabled={setConfig.isPending}
               >
                 Save classifier
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Duplicate checking</CardTitle>
+              <CardDescription>Disable pHash-based duplicate image detection for submissions.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="disable-fraud" className="cursor-pointer">
+                  Remove duplicate checking
+                </Label>
+                <Switch
+                  id="disable-fraud"
+                  checked={disableFraud}
+                  onCheckedChange={setDisableFraud}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {disableFraud
+                  ? '⚠️ Duplicate detection is currently disabled. Users can submit the same image multiple times.'
+                  : '✓ Duplicate detection is active. Duplicate images within the fraud window are rejected.'}
+              </p>
+              <Button
+                onClick={() => setConfig.mutate({ key: KEYS.disableFraud, value: disableFraud })}
+                disabled={setConfig.isPending}
+              >
+                Save
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Secondary classifier</CardTitle>
+              <CardDescription>Disable second model verification for low-confidence submissions.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="disable-secondary" className="cursor-pointer">
+                  Skip secondary classifier
+                </Label>
+                <Switch
+                  id="disable-secondary"
+                  checked={disableSecondary}
+                  onCheckedChange={setDisableSecondary}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {disableSecondary
+                  ? '⚠️ Secondary classifier is disabled. Low-confidence submissions skip verification and go directly to dispute queue.'
+                  : '✓ Secondary classifier is active. Low-confidence submissions are verified by a second model before disputing.'}
+              </p>
+              <Button
+                onClick={() => setConfig.mutate({ key: KEYS.disableSecondary, value: disableSecondary })}
+                disabled={setConfig.isPending}
+              >
+                Save
               </Button>
             </CardContent>
           </Card>

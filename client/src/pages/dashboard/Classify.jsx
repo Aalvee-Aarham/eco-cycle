@@ -12,7 +12,31 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Label } from '@/components/ui/Label';
 import { assetUrl } from '@/lib/utils';
-import { ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Upload, Zap, Clock, AlertTriangle } from 'lucide-react';
+
+const TIER_META = {
+  high: {
+    icon: <Zap className="h-4 w-4" />,
+    label: 'High Confidence',
+    className: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+    message: '✅ Classified! Points have been awarded.',
+    messageClass: 'text-emerald-700 bg-emerald-50 border border-emerald-200',
+  },
+  medium: {
+    icon: <Clock className="h-4 w-4" />,
+    label: 'Medium Confidence',
+    className: 'bg-amber-100 text-amber-800 border border-amber-200',
+    message: '⚠️ Medium confidence — sent to the moderator queue for review.',
+    messageClass: 'text-amber-700 bg-amber-50 border border-amber-200',
+  },
+  low: {
+    icon: <AlertTriangle className="h-4 w-4" />,
+    label: 'Low Confidence',
+    className: 'bg-red-100 text-red-800 border border-red-200',
+    message: '🔄 Low confidence — a secondary model is verifying this. Check back later.',
+    messageClass: 'text-red-700 bg-red-50 border border-red-200',
+  },
+};
 
 export default function Classify() {
   const classify = useClassify();
@@ -59,7 +83,23 @@ export default function Classify() {
 
   const submission = result?.submission ?? result;
   const flagged = result?.flagged;
-  const imgSrc = submission?.imageUrl ? assetUrl(submission.imageUrl) : preview;
+
+  // Display YOLO bounding-box image if available, else Cloudinary URL, else local preview
+  let imgSrc = preview;
+  if (result?.raw?.detected_image) {
+    imgSrc = `data:image/jpeg;base64,${result.raw.detected_image}`;
+  } else if (submission?.detectedImageUrl) {
+    imgSrc = assetUrl(submission.detectedImageUrl);
+  } else if (submission?.imageUrl) {
+    imgSrc = assetUrl(submission.imageUrl);
+  }
+
+  const tier = submission?.confidenceTier;
+  const tierMeta = TIER_META[tier];
+  const isYolo = submission?.classifier === 'yolo';
+  const hasDetections = Array.isArray(result?.raw?.detections) && result.raw.detections.length > 0;
+  // Gemini reasoning is stored on submission
+  const hasReasoning = !!submission?.reasoning;
 
   return (
     <PageWrapper>
@@ -72,16 +112,15 @@ export default function Classify() {
             {!classify.isPending && (
               <>
                 <div className="space-y-2">
-                  <Label>Classifier override (optional)</Label>
+                  <Label>Classifier (optional override)</Label>
                   <select
                     className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm"
                     value={classifierOverride}
                     onChange={(e) => setClassifierOverride(e.target.value)}
                   >
-                    <option value="">Default (server)</option>
-                    <option value="gemini">gemini</option>
-                    <option value="yolo">yolo</option>
-                    <option value="mock">mock</option>
+                    <option value="">Default (server setting)</option>
+                    <option value="yolo">YOLO (object detection)</option>
+                    <option value="gemini">Gemini (AI vision)</option>
                   </select>
                 </div>
 
@@ -162,10 +201,32 @@ export default function Classify() {
                 <>
                   <div className="flex flex-col sm:flex-row gap-6 items-start">
                     {imgSrc && (
-                      <img src={imgSrc} alt="" className="w-full sm:w-40 h-40 object-cover rounded-lg border" />
+                      <div className="relative group flex-shrink-0">
+                        <img
+                          src={imgSrc}
+                          alt="Classified"
+                          className="w-full sm:w-64 h-auto aspect-video sm:aspect-square object-cover rounded-lg border shadow-sm"
+                        />
+                        {/* Classifier badge */}
+                        {submission.classifier && (
+                          <div className={`absolute top-2 left-2 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm uppercase tracking-wider ${
+                            submission.classifier === 'yolo' ? 'bg-emerald-500' : 'bg-indigo-500'
+                          }`}>
+                            {submission.classifier === 'yolo' ? '🎯 YOLO' : '🤖 Gemini'}
+                          </div>
+                        )}
+                      </div>
                     )}
                     <ConfidenceMeter value={submission.confidence} />
                   </div>
+
+                  {/* Confidence tier badge */}
+                  {tierMeta && (
+                    <div className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${tierMeta.className}`}>
+                      {tierMeta.icon}
+                      {tierMeta.label}
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -181,33 +242,46 @@ export default function Classify() {
                       <span className="text-sm text-slate-500">State:</span>
                       <StateBadge state={submission.state} />
                     </div>
-                    {submission.classifier && (
-                      <p className="text-xs text-slate-400">Classifier: {submission.classifier}</p>
-                    )}
                   </div>
 
-                  {submission.reasoning && (
-                    <div className="border rounded-lg">
+                  {/* Tier status message */}
+                  {tierMeta && (
+                    <p className={`text-sm rounded-md px-3 py-2 ${tierMeta.messageClass}`}>
+                      {tierMeta.message}
+                    </p>
+                  )}
+
+                  {/* AI insights: YOLO detections OR Gemini reasoning */}
+                  {(hasDetections || hasReasoning) && (
+                    <div className="border rounded-lg overflow-hidden">
                       <button
                         type="button"
-                        className="flex w-full items-center justify-between p-3 text-sm font-medium text-slate-700"
+                        className="flex w-full items-center justify-between p-3 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                         onClick={() => setReasonOpen(!reasonOpen)}
                       >
-                        AI reasoning
+                        {isYolo ? '🎯 Object detection data' : '🤖 AI reasoning'}
                         {reasonOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
                       {reasonOpen && (
                         <div className="px-3 pb-3 text-sm text-slate-600 border-t bg-slate-50/80">
-                          {submission.reasoning}
+                          {isYolo && hasDetections ? (
+                            <div className="space-y-1 pt-2">
+                              {result.raw.detections.map((d, i) => (
+                                <div key={i} className="flex justify-between items-center text-xs py-0.5">
+                                  <span className="font-mono font-medium">{d.class_name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-slate-400">{d.ecocycle_stream}</span>
+                                    <span className="font-semibold tabular-nums">{(d.confidence * 100).toFixed(1)}%</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : hasReasoning ? (
+                            <p className="pt-2 leading-relaxed">{submission.reasoning}</p>
+                          ) : null}
                         </div>
                       )}
                     </div>
-                  )}
-
-                  {submission.state === 'IN_DISPUTE' && (
-                    <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                      Low confidence — sent to dispute queue for review.
-                    </p>
                   )}
 
                   <div className="flex flex-wrap gap-2 pt-2">

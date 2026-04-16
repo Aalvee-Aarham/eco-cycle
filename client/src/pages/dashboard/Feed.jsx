@@ -111,14 +111,19 @@ export default function Feed() {
                 </div>
 
                 {/* Body: Image with hover effect */}
-                {s.imageUrl ? (
+                {s.detectedImageUrl || s.imageUrl ? (
                   <div className="w-full aspect-square sm:aspect-[4/3] bg-slate-100 relative group overflow-hidden border-y border-slate-100">
                     <img 
-                      src={assetUrl(s.imageUrl)} 
+                      src={assetUrl(s.detectedImageUrl || s.imageUrl)} 
                       alt="Waste submission" 
                       className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                    {s.detectedImageUrl && (
+                      <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded shadow-sm uppercase tracking-tighter">
+                        AI Detected
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="w-full aspect-square sm:aspect-[4/3] bg-slate-50 border-y border-slate-100 flex items-center justify-center text-slate-400 text-sm italic">

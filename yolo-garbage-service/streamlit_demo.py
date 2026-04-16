@@ -1,208 +1,217 @@
 """
-Optional local-only UI for garbage YOLO (not used in production).
-
-Production default for EcoCycle is **FastAPI** (`inference_api.py` / Docker / Railway).
-Run this demo: `cd yolo-garbage-service && streamlit run streamlit_demo.py`
-
-Weights: YOLO_WEIGHTS env, or weights/best.pt; yolov8n.pt = quick COCO test only.
+EcoCycle – Garbage Classification (Streamlit)
+Runs exclusively on weights/best.pt — no network, no COCO fallback.
+Deploy to Streamlit Cloud: push this file + weights/best.pt + requirements.txt.
 """
 import os
+import sys
 
 import streamlit as st
 from PIL import Image
 from ultralytics import YOLO
 
+# ── Paths ────────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.environ.get("YOLO_WEIGHTS", os.path.join(_BASE, "weights", "best.pt"))
-DEVICE = os.environ.get("YOLO_DEVICE", "cpu")
-# Match Ultralytics predict defaults (same as original Streamlit app behaviour).
-_IMGSZ = int(os.environ.get("YOLO_IMGSZ", "640"))
-_IOU = float(os.environ.get("YOLO_IOU", "0.7"))
+MODEL_PATH = os.path.join(_BASE, "weights", "best.pt")
 
-# Roboflow "garbage-classification-3" material streams → EcoCycle DB categories (same spirit as server YOLOAdapter).
-# Keys are lowercased detector names. Unmatched labels fall back to "organic" (mixed / unknown waste)
-# — COCO demo classes (keyboard, tv, …) are not garbage names, so we add common e-waste hints below.
-CLASS_TO_ECOCYCLE = {
-    "paper": "recyclable",
-    "plastic": "recyclable",
-    "glass": "recyclable",
-    "metal": "recyclable",
-    "cardboard": "recyclable",
-    "cloth": "recyclable",
-    "clothes": "recyclable",
-    "textile": "recyclable",
-    "trash": "organic",
-    "garbage": "organic",
-    "organic": "organic",
-    "biodegradable": "organic",
-    "food": "organic",
-    "battery": "e-waste",
-    "electronics": "e-waste",
-    # COCO-style names when using yolov8n.pt for smoke tests
-    "keyboard": "e-waste",
-    "mouse": "e-waste",
-    "laptop": "e-waste",
-    "tv": "e-waste",
-    "cell_phone": "e-waste",
-    "remote": "e-waste",
-    "microwave": "e-waste",
-    "toaster": "e-waste",
-    "oven": "e-waste",
-    "refrigerator": "e-waste",
-    "hair_drier": "e-waste",
-    "chemical": "hazardous",
-    "hazardous": "hazardous",
+# ── Inference config (override via env vars if needed) ───────────────────────
+DEVICE = os.environ.get("YOLO_DEVICE", "cpu")
+_IMGSZ = int(os.environ.get("YOLO_IMGSZ", "640"))
+_IOU   = float(os.environ.get("YOLO_IOU", "0.7"))
+_DEFAULT_CONF = float(os.environ.get("YOLO_CONF", "0.25"))
+
+# ── Label → EcoCycle stream mapping ─────────────────────────────────────────
+CLASS_TO_ECOCYCLE: dict[str, str] = {
+    "paper":        "recyclable",
+    "plastic":      "recyclable",
+    "glass":        "recyclable",
+    "metal":        "recyclable",
+    "cardboard":    "recyclable",
+    "cloth":        "recyclable",
+    "clothes":      "recyclable",
+    "textile":      "recyclable",
+    "trash":        "organic",
+    "garbage":      "organic",
+    "organic":      "organic",
+    "biodegradable":"organic",
+    "food":         "organic",
+    "battery":      "e-waste",
+    "electronics":  "e-waste",
+    "chemical":     "hazardous",
+    "hazardous":    "hazardous",
+}
+
+_EWASTE_HINTS = (
+    "battery", "keyboard", "laptop", "mouse", "cell", "monitor", "tv",
+    "remote", "microwave", "toaster", "oven", "refrigerator", "washer",
+    "dryer", "hair_drier", "printer", "router", "camera", "tablet",
+    "clock", "headphone", "charger", "circuit",
+)
+
+_RECYCLABLE_PARTS = ("plastic", "paper", "metal", "glass", "cardboard", "bottle", "can")
+
+STREAM_COLORS = {
+    "recyclable": "#2ecc71",
+    "organic":    "#e67e22",
+    "e-waste":    "#3498db",
+    "hazardous":  "#e74c3c",
+}
+
+STREAM_ICONS = {
+    "recyclable": "♻️",
+    "organic":    "🌿",
+    "e-waste":    "🔋",
+    "hazardous":  "⚠️",
 }
 
 
-def normalize(name: str) -> str:
+def _normalize(name: str) -> str:
     return str(name).strip().lower().replace(" ", "_").replace("-", "_")
 
 
-# Substrings for labels not in CLASS_TO_ECOCYCLE (covers COCO + typos). Order: e-waste before recyclable.
-_EWASTE_HINTS = (
-    "keyboard",
-    "laptop",
-    "mouse",
-    "cell",
-    "monitor",
-    "tv",
-    "remote",
-    "microwave",
-    "toaster",
-    "oven",
-    "refrigerator",
-    "washer",
-    "dryer",
-    "hair_drier",
-    "hair drier",
-    "printer",
-    "router",
-    "camera",
-    "tablet",
-    "clock",
-    "headphone",
-    "charger",
-    "circuit",
-    "battery",
-)
-
-
 def to_ecocycle(detector_label: str) -> str:
-    key = normalize(detector_label)
+    key = _normalize(detector_label)
     if key in CLASS_TO_ECOCYCLE:
         return CLASS_TO_ECOCYCLE[key]
     for hint in _EWASTE_HINTS:
-        if normalize(hint) in key or hint.replace(" ", "_") in key:
+        if _normalize(hint) in key:
             return "e-waste"
-    # Use "cardboard" not "card" — avoids bogus matches on unrelated words.
-    for part in ("plastic", "paper", "metal", "glass", "cardboard", "bottle", "can"):
+    for part in _RECYCLABLE_PARTS:
         if part in key:
             return "recyclable"
     return "organic"
 
 
-@st.cache_resource
-def load_model():
+# ── Model loader (cached across reruns) ─────────────────────────────────────
+@st.cache_resource(show_spinner="Loading model…")
+def load_model() -> YOLO:
+    if not os.path.isfile(MODEL_PATH):
+        st.error(
+            f"**Model weights not found.**\n\n"
+            f"Expected: `{MODEL_PATH}`\n\n"
+            "Place `best.pt` inside a `weights/` folder next to this file and redeploy."
+        )
+        st.stop()
     try:
         return YOLO(MODEL_PATH)
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot load `{MODEL_PATH}`. Put best.pt in weights/ or set YOLO_WEIGHTS=yolov8n.pt for a quick test."
-        ) from e
+    except Exception as exc:
+        st.error(f"Failed to load model: {exc}")
+        st.stop()
 
 
+# ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Garbage YOLO demo",
+    page_title="EcoCycle – Garbage Classifier",
+    page_icon="♻️",
     layout="centered",
     menu_items={"Get help": None, "Report a bug": None, "About": None},
 )
 
-# Fallback if `.streamlit/config.toml` toolbarMode is ignored: hide Cloud "Deploy" chip only
 st.markdown(
-    "<style>[data-testid='stAppDeployButton']{display:none!important}</style>",
+    "<style>"
+    "[data-testid='stAppDeployButton']{display:none!important}"
+    "footer{visibility:hidden}"
+    "</style>",
     unsafe_allow_html=True,
 )
 
-st.title("Garbage classification (YOLO demo)")
-st.caption("Local demo only — production API is `inference_api.py` (FastAPI).")
-
-with st.expander("What the algorithm does", expanded=True):
-    st.markdown(
-        """
-        1. **YOLO** finds objects in the image (bounding boxes + class + score).
-        2. **Threshold** — you choose a minimum score; weaker boxes are ignored (fewer false alarms, but you can miss objects if it is too high).
-        3. **Categories** — each kept box has a **detector class** (from your training data). This demo maps those names to **EcoCycle** streams: recyclable, organic, e-waste, hazardous.
-        """
-    )
-
-st.subheader("garbage-classification → EcoCycle")
-st.table(
-    [
-        {"Detector class (example dataset)": "PAPER, PLASTIC, GLASS, METAL, CARDBOARD, CLOTH", "EcoCycle stream": "recyclable"},
-        {"Detector class (example dataset)": "TRASH, ORGANIC, BIODEGRADABLE, …", "EcoCycle stream": "organic"},
-        {"Detector class (example dataset)": "BATTERY, ELECTRONICS, …", "EcoCycle stream": "e-waste"},
-        {"Detector class (example dataset)": "CHEMICAL, HAZARDOUS, …", "EcoCycle stream": "hazardous"},
-    ]
+# ── Header ───────────────────────────────────────────────────────────────────
+st.title("♻️ EcoCycle Garbage Classifier")
+st.markdown(
+    "Upload a photo of waste. The model detects objects and maps each one to an "
+    "**EcoCycle disposal stream**: recyclable, organic, e-waste, or hazardous."
 )
 
-min_conf = st.slider(
-    "Confidence threshold",
-    min_value=0.05,
-    max_value=0.95,
-    value=float(os.environ.get("YOLO_CONF", "0.2")),
-    step=0.05,
-    help="Ultralytics default in the original demo was 0.2 — lower keeps more boxes (higher recall).",
-)
-
-st.caption(
-    f"Weights: `{MODEL_PATH}`  ·  device: `{DEVICE}`  ·  imgsz `{_IMGSZ}`  ·  NMS IoU `{_IOU}`"
-)
-
-uploaded = st.file_uploader("Upload one image", type=["jpg", "jpeg", "png", "webp", "bmp"])
-
-if uploaded is not None:
-    img = Image.open(uploaded).convert("RGB")
-    st.image(img, caption="Input", use_container_width=True)
-
-if st.button("Run detection", disabled=uploaded is None):
-    model = load_model()
-    results = model(
-        img,
-        conf=min_conf,
-        iou=_IOU,
-        imgsz=_IMGSZ,
-        device=DEVICE,
-        max_det=300,
-        half=False,
-        verbose=False,
-    )
-    r0 = results[0]
-    boxes = r0.boxes
-
-    st.image(r0.plot()[:, :, ::-1], caption=f"Boxes (conf ≥ {min_conf})", use_container_width=True)
-
-    if boxes is None or len(boxes) == 0:
-        st.warning("No detections above the threshold. Lower the threshold or use a clearer photo.")
-    else:
-        rows = []
-        for box in boxes:
-            cid = int(box.cls[0].item())
-            score = float(box.conf[0].item())
-            raw = model.names[cid] if isinstance(model.names, dict) else model.names[cid]
-            rows.append(
-                {
-                    "Detected class": str(raw),
-                    "Confidence": round(score, 3),
-                    "EcoCycle stream": to_ecocycle(raw),
-                }
-            )
-        st.dataframe(rows, use_container_width=True)
-        top = max(rows, key=lambda x: x["Confidence"])
-        st.success(f"Strongest detection: **{top['Detected class']}** → **{top['EcoCycle stream']}** (score {top['Confidence']})")
+# ── Stream legend ────────────────────────────────────────────────────────────
+with st.expander("Disposal stream reference", expanded=False):
+    cols = st.columns(4)
+    for col, (stream, color) in zip(cols, STREAM_COLORS.items()):
+        col.markdown(
+            f"<div style='padding:10px;border-radius:8px;background:{color}22;"
+            f"border-left:4px solid {color};'>"
+            f"<b>{STREAM_ICONS[stream]} {stream.capitalize()}</b></div>",
+            unsafe_allow_html=True,
+        )
 
 st.divider()
-st.caption(
-    "Train on [garbage-classification-3](https://universe.roboflow.com/material-identification/garbage-classification-3) "
-    "and save weights as `weights/best.pt`. Using `yolov8n.pt` shows **COCO** classes (person, car, …), not garbage names — only for testing that the app runs."
-)
+
+# ── Controls ─────────────────────────────────────────────────────────────────
+col_upload, col_conf = st.columns([3, 1])
+
+with col_upload:
+    uploaded = st.file_uploader(
+        "Upload image", type=["jpg", "jpeg", "png", "webp", "bmp"], label_visibility="collapsed"
+    )
+
+with col_conf:
+    min_conf = st.slider(
+        "Confidence threshold",
+        min_value=0.05,
+        max_value=0.95,
+        value=_DEFAULT_CONF,
+        step=0.05,
+        help="Detections below this score are discarded. Lower = more boxes (higher recall).",
+    )
+
+# ── Inference ────────────────────────────────────────────────────────────────
+if uploaded is not None:
+    img = Image.open(uploaded).convert("RGB")
+    st.image(img, caption="Input image", use_container_width=True)
+
+    if st.button("🔍 Classify", type="primary", use_container_width=True):
+        model = load_model()
+
+        with st.spinner("Running detection…"):
+            results = model(
+                img,
+                conf=min_conf,
+                iou=_IOU,
+                imgsz=_IMGSZ,
+                device=DEVICE,
+                max_det=300,
+                half=False,
+                verbose=False,
+            )
+
+        r0 = results[0]
+        boxes = r0.boxes
+
+        st.image(
+            r0.plot()[:, :, ::-1],
+            caption=f"Detections (confidence ≥ {min_conf})",
+            use_container_width=True,
+        )
+
+        if boxes is None or len(boxes) == 0:
+            st.warning(
+                "No detections above the threshold. "
+                "Try lowering the confidence threshold or using a clearer photo."
+            )
+        else:
+            rows = []
+            for box in boxes:
+                cid   = int(box.cls[0].item())
+                score = float(box.conf[0].item())
+                raw   = model.names[cid]
+                stream = to_ecocycle(raw)
+                rows.append({
+                    "Detected class": str(raw),
+                    "Confidence":     round(score, 3),
+                    "EcoCycle stream": f"{STREAM_ICONS[stream]} {stream}",
+                })
+
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+            top = max(rows, key=lambda x: x["Confidence"])
+            raw_stream = top["EcoCycle stream"].split(" ", 1)[1]  # strip icon
+            color = STREAM_COLORS[raw_stream]
+
+            st.markdown(
+                f"<div style='padding:16px;border-radius:10px;background:{color}22;"
+                f"border-left:5px solid {color};margin-top:12px;'>"
+                f"<b>Strongest detection:</b> {top['Detected class'].upper()} — "
+                f"{top['EcoCycle stream']} (score {top['Confidence']})</div>",
+                unsafe_allow_html=True,
+            )
+else:
+    st.info("Upload an image above to get started.")

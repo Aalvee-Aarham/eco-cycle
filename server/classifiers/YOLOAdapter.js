@@ -12,10 +12,9 @@ function normalizeLabel(label) {
 
 /**
  * Maps detector class names → EcoCycle submission categories.
- * Includes Roboflow "garbage-classification-3" streams (paper, plastic, glass, metal, cardboard, cloth).
  */
 const LABEL_MAP = {
-  // garbage-classification-3 (Material Identification)
+  // Material identification
   paper: 'recyclable',
   plastic: 'recyclable',
   glass: 'recyclable',
@@ -88,21 +87,27 @@ const DEFAULT_TIMEOUT_MS = Number(process.env.YOLO_HTTP_TIMEOUT_MS || 30000);
 
 export class YOLOAdapter extends ClassifierAdapter {
   async classify(imageBuffer, mimeType) {
+    console.log('[YOLOAdapter] Sending image to local inference API...');
     const url = process.env.YOLO_API_URL;
     if (!url) {
       throw new Error('YOLO_API_URL is not set');
     }
 
+    // inference_api.py /detect expects multipart field named "file"
     const form = new FormData();
-    form.append('image', imageBuffer, { contentType: mimeType, filename: 'image.jpg' });
+    form.append('file', imageBuffer, { contentType: mimeType, filename: 'image.jpg' });
 
     const { data } = await axios.post(url, form, {
       headers: form.getHeaders(),
       timeout: DEFAULT_TIMEOUT_MS,
     });
 
-    const predictions = Array.isArray(data?.predictions) ? data.predictions : [];
-    if (predictions.length === 0) {
+    // Response shape from inference_api.py:
+    // { success, detections: [{class_name, class_id, confidence, ecocycle_stream, bounding_box}],
+    //   detected_image: "<base64_jpeg>", detection_count, inference_ms, ... }
+    const detections = Array.isArray(data?.detections) ? data.detections : [];
+
+    if (detections.length === 0) {
       return {
         category: 'organic',
         subcategory: 'no_detection',
@@ -111,15 +116,28 @@ export class YOLOAdapter extends ClassifierAdapter {
       };
     }
 
-    const best = [...predictions].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
-    const label = best.label ?? 'unknown';
+    // Best detection is first (inference_api sorts by confidence desc)
+    const best = detections[0];
+    const label = best.class_name ?? 'unknown';
     const confidence = typeof best.confidence === 'number' ? best.confidence : 0;
 
+    // Build predictions array compatible with the Classify UI
+    const predictions = detections.map((d) => ({
+      label: d.class_name,
+      confidence: d.confidence,
+      ecocycle_stream: d.ecocycle_stream,
+      bounding_box: d.bounding_box,
+    }));
+
     return {
-      category: mapLabelToCategory(label),
+      category: best.ecocycle_stream ?? mapLabelToCategory(label),
       subcategory: label,
       confidence,
-      rawResponse: data,
+      rawResponse: {
+        ...data,
+        predictions,
+        detected_image: data.detected_image ?? null,
+      },
     };
   }
 }

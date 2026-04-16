@@ -1,31 +1,31 @@
-# Slim + fast on CPU: ONNX Runtime only (typical image ~1.2–2.5 GB, well under 4 GB).
-# Do not install PyTorch here — that pushes images past ~4 GB.
-FROM python:3.11-slim-bookworm
+# Hugging Face Spaces requires:
+#   1. A non-root user (uid 1000)
+#   2. Port 7860
+#   3. Write access only to /tmp
+
+FROM python:3.11-slim
+
+# System deps for OpenCV / Pillow / PyTorch
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user (HF Spaces requirement)
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python dependencies
+COPY --chown=user requirements-api.txt .
+RUN pip install --no-cache-dir --upgrade -r requirements-api.txt
 
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt
+# Copy app and weights
+COPY --chown=user inference_api.py .
+COPY --chown=user weights/ weights/
 
-COPY inference_api.py onnx_backend.py .
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# HF Spaces always uses port 7860
+EXPOSE 7860
 
-RUN mkdir -p /app/weights
-
-ENV INFERENCE_BACKEND=onnx
-ENV YOLO_WEIGHTS=/app/weights/best.onnx
-ENV YOLO_DEVICE=cpu
-ENV YOLO_CONF=0.25
-ENV PORT=8000
-# Sensible default for 2 vCPU Railway boxes; override with Variables
-ENV ORT_NUM_THREADS=2
-ENV OMP_NUM_THREADS=2
-
-EXPOSE 8000
-
-ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["uvicorn", "inference_api:app", "--host", "0.0.0.0", "--port", "7860"]

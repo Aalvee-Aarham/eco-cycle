@@ -5,6 +5,13 @@ import Submission from '../models/Submission.js';
 export const FraudService = {
   async check(userId, pHash) {
     const config = getConfig();
+    
+    // If fraud checking is disabled, return false (no fraud detected)
+    if (config.DISABLE_FRAUD_CHECK) {
+      console.log('[FraudService] Duplicate checking disabled via config');
+      return false;
+    }
+    
     const threshold = config.PHASH_HAMMING_THRESHOLD;
 
     // MongoDB-based duplicate detection — reliable, no Redis dependency.

@@ -8,6 +8,7 @@ const STATES = [
   'PENDING', 'CLASSIFIED', 'IN_DISPUTE', 'RESOLVED_AUTO',
   'RESOLVED_MANUAL', 'AWAITING_REWARD', 'REWARDED', 'FLAGGED', 'REDEEMED'
 ];
+const CONFIDENCE_TIERS = ['high', 'medium', 'low'];
 
 const submissionSchema = new Schema(
   {
@@ -17,7 +18,8 @@ const submissionSchema = new Schema(
     category: { type: String, enum: CATEGORIES },
     subcategory: String,
     confidence: Number,
-    disputeResult: { category: String, confidence: Number },
+    confidenceTier: { type: String, enum: CONFIDENCE_TIERS },
+    disputeResult: { category: String, confidence: Number, classifier: String },
     state: { type: String, enum: STATES, default: 'PENDING' },
     points: { type: Number, default: 0 },
     idempotencyKey: { type: String, unique: true, sparse: true },
@@ -25,6 +27,7 @@ const submissionSchema = new Schema(
     resolvedBy: { type: ObjectId, ref: 'User' },
     classifier: String,
     reasoning: String,
+    detectedImageUrl: String,
   },
   { timestamps: true }
 );
@@ -32,20 +35,27 @@ const submissionSchema = new Schema(
 submissionSchema.index({ user: 1, createdAt: -1 });
 submissionSchema.index({ state: 1 });
 submissionSchema.index({ pHash: 1 });
+submissionSchema.index({ confidenceTier: 1 });
 
 submissionSchema.pre('save', function (next) {
   if (this.isModified('state') && !this.isNew) {
-    const from = this._originalState || this.get('state', null, { getters: false });
-    // Note: this.get('state') would give the target state.
-    // We need to track the original state.
-    // However, since we use the .transition() method, it's already covered.
-    // To make it truly robust against manual .save(), we use a virtual or init hook.
+    // Note: transition() method handles this check explicitly.
   }
   next();
 });
 
 // Capture original state on load
 submissionSchema.post('init', function (doc) {
+  doc._originalState = doc.state;
+});
+
+// Update original state on save to support multiple chained transitions on the same instance
+submissionSchema.post('save', function (doc) {
+  doc._originalState = doc.state;
+});
+
+// Update original state on save to support multiple chained transitions on the same instance
+submissionSchema.post('save', function (doc) {
   doc._originalState = doc.state;
 });
 

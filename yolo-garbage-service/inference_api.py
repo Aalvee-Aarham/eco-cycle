@@ -1,120 +1,258 @@
 """
-HTTP inference API for EcoCycle Node (YOLOAdapter).
-POST /predict — multipart field "image" (same contract as server/classifiers/YOLOAdapter.js).
+EcoCycle – YOLO Garbage Detection API
+FastAPI server that accepts an image and returns detected garbage with
+bounding boxes, confidence scores, and EcoCycle stream classification.
 
-Production Docker uses INFERENCE_BACKEND=onnx (small image, no PyTorch).
-Local / full stack: INFERENCE_BACKEND=torch + Ultralytics + .pt
+Run locally:
+    uvicorn inference_api:app --host 0.0.0.0 --port 8000 --reload
+
+Docker:
+    docker build -t ecocycle-api .
+    docker run -p 8000:8000 ecocycle-api
+
+POST /detect
+    Body : multipart/form-data  →  file: <image>
+    Query: conf  (float, default 0.25)  confidence threshold
+    Returns: JSON  (see DetectionResponse schema below)
 """
-from __future__ import annotations
 
+import base64
+import io
 import os
-from io import BytesIO
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import uvicorn
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from PIL import Image
+from pydantic import BaseModel, Field
+from ultralytics import YOLO
 
-MODEL_PATH = os.environ.get("YOLO_WEIGHTS", os.path.join(os.path.dirname(__file__), "weights", "best.onnx"))
-DEFAULT_CONF = float(os.environ.get("YOLO_CONF", "0.25"))
-DEVICE = os.environ.get("YOLO_DEVICE", "cpu")
-YOLO_IOU = float(os.environ.get("YOLO_IOU", "0.7"))
-YOLO_IMGSZ = int(os.environ.get("YOLO_IMGSZ", "640"))
+# ── Config ────────────────────────────────────────────────────────────────────
+_BASE       = Path(__file__).parent
+MODEL_PATH  = _BASE / "weights" / "best.pt"
+DEVICE      = "cpu"
+_IMGSZ      = 640
+_IOU        = 0.7
+_DEFAULT_CONF = 0.1
 
-def _backend() -> str:
-    b = os.environ.get("INFERENCE_BACKEND", "").strip().lower()
-    if b in ("onnx", "torch"):
-        return b
-    if MODEL_PATH.lower().endswith(".onnx"):
-        return "onnx"
-    if MODEL_PATH.lower().endswith(".pt"):
-        return "torch"
-    return "onnx"
+ALLOWED_MIME = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20 MB
 
+# ── Label → EcoCycle stream ───────────────────────────────────────────────────
+CLASS_TO_ECOCYCLE: dict[str, str] = {
+    "paper": "recyclable", "plastic": "recyclable", "glass": "recyclable",
+    "metal": "recyclable", "cardboard": "recyclable", "cloth": "recyclable",
+    "clothes": "recyclable", "textile": "recyclable",
+    "trash": "organic", "garbage": "organic", "organic": "organic",
+    "biodegradable": "organic", "food": "organic",
+    "battery": "e-waste", "electronics": "e-waste",
+    "chemical": "hazardous", "hazardous": "hazardous",
+}
+_EWASTE_HINTS    = ("battery","keyboard","laptop","mouse","cell","monitor","tv",
+                    "remote","microwave","toaster","oven","refrigerator","washer",
+                    "dryer","hair_drier","printer","router","camera","tablet",
+                    "clock","headphone","charger","circuit")
+_RECYC_PARTS     = ("plastic","paper","metal","glass","cardboard","bottle","can")
 
-app = FastAPI(title="EcoCycle YOLO Garbage Service", version="1.0.0")
+def _norm(s: str) -> str:
+    return str(s).strip().lower().replace(" ", "_").replace("-", "_")
 
-_model_torch: Any = None
+def to_ecocycle(label: str) -> str:
+    key = _norm(label)
+    if key in CLASS_TO_ECOCYCLE:
+        return CLASS_TO_ECOCYCLE[key]
+    for h in _EWASTE_HINTS:
+        if _norm(h) in key:
+            return "e-waste"
+    for p in _RECYC_PARTS:
+        if p in key:
+            return "recyclable"
+    return "organic"
 
+# ── Pydantic schemas ──────────────────────────────────────────────────────────
+class BoundingBox(BaseModel):
+    x1: float = Field(..., description="Left edge (pixels)")
+    y1: float = Field(..., description="Top edge (pixels)")
+    x2: float = Field(..., description="Right edge (pixels)")
+    y2: float = Field(..., description="Bottom edge (pixels)")
+    width:  float = Field(..., description="Box width  (pixels)")
+    height: float = Field(..., description="Box height (pixels)")
 
-def get_model_torch():
-    global _model_torch
-    if _model_torch is None:
-        from ultralytics import YOLO
+class Detection(BaseModel):
+    class_id:      int        = Field(..., description="Model class index")
+    class_name:    str        = Field(..., description="Raw detector label")
+    ecocycle_stream: str      = Field(..., description="recyclable | organic | e-waste | hazardous")
+    confidence:    float      = Field(..., description="Detection confidence 0–1")
+    bounding_box:  BoundingBox
 
-        try:
-            _model_torch = YOLO(MODEL_PATH)
-        except Exception as e:
-            raise RuntimeError(
-                f"Could not load YOLO weights from {MODEL_PATH}. "
-                "Use a .pt file or set YOLO_WEIGHTS (hub names like yolov8n.pt for tests)."
-            ) from e
-    return _model_torch
+class DetectionResponse(BaseModel):
+    success:        bool
+    image_width:    int
+    image_height:   int
+    inference_ms:   float      = Field(..., description="Model inference time in milliseconds")
+    detection_count: int
+    detections:     List[Detection]
+    detected_image: Optional[str] = Field(None, description="Base64-encoded JPEG with bounding boxes drawn")
 
+# ── Lifespan: load model once at startup ─────────────────────────────────────
+_model: Optional[YOLO] = None
 
-def _weights_path_ready() -> bool:
-    p = Path(MODEL_PATH)
-    if _backend() == "onnx":
-        return p.is_file()
-    # torch: hub single filename
-    if len(p.parts) == 1 and MODEL_PATH.lower().endswith(".pt"):
-        return True
-    return p.is_file()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _model
+    if not MODEL_PATH.is_file():
+        raise RuntimeError(
+            f"Model weights not found at '{MODEL_PATH}'. "
+            "Place best.pt inside the weights/ directory."
+        )
+    _model = YOLO(str(MODEL_PATH))
+    # Warm-up: single forward pass avoids slow first request
+    dummy = Image.new("RGB", (64, 64), color=0)
+    _model(dummy, imgsz=64, verbose=False)
+    print(f"✅  Model loaded: {MODEL_PATH}")
+    yield
+    _model = None
 
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="EcoCycle Garbage Detection API",
+    description=(
+        "Upload an image and receive bounding boxes, confidence scores, "
+        "and EcoCycle disposal stream for each detected object."
+    ),
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
-@app.get("/health")
+# CORS configuration for Hugging Face Spaces and Railway
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else [
+    "*",  # Allow all origins (Hugging Face Spaces: requests come from various hosts)
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
+# ── Health check ──────────────────────────────────────────────────────────────
+@app.get("/health", tags=["Utility"])
 def health():
-    return {"status": "ok" if _weights_path_ready() else "no_weights", "weights_path": MODEL_PATH, "backend": _backend()}
+    return {"status": "ok", "model": str(MODEL_PATH), "device": DEVICE}
 
+# ── Main detection endpoint ───────────────────────────────────────────────────
+@app.post(
+    "/detect",
+    response_model=DetectionResponse,
+    summary="Detect garbage in an uploaded image",
+    tags=["Detection"],
+)
+async def detect(
+    file: UploadFile = File(..., description="Image file (JPEG / PNG / WebP / BMP)"),
+    conf: float = Query(
+        default=_DEFAULT_CONF,
+        ge=0.01, le=0.99,
+        description="Confidence threshold — detections below this are discarded",
+    ),
+):
+    # ── Validate file ──────────────────────────────────────────────────────
+    if file.content_type not in ALLOWED_MIME:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported media type '{file.content_type}'. "
+                   f"Accepted: {sorted(ALLOWED_MIME)}",
+        )
 
-@app.post("/predict")
-async def predict(image: UploadFile = File(...)):
-    raw = await image.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="empty image body")
+    raw = await file.read()
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({len(raw)//1024} KB). Max is {MAX_IMAGE_BYTES//1024//1024} MB.",
+        )
 
     try:
-        pil = Image.open(BytesIO(raw)).convert("RGB")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"invalid image: {e}") from e
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=422, detail="Cannot decode image. Upload a valid image file.")
 
-    backend = _backend()
-    predictions: list[dict[str, Any]] = []
+    img_w, img_h = img.size
 
+    # ── Run YOLO ───────────────────────────────────────────────────────────
+    t0 = time.perf_counter()
+    results = _model(
+        img,
+        conf=conf,
+        iou=_IOU,
+        imgsz=_IMGSZ,
+        device=DEVICE,
+        max_det=300,
+        half=False,
+        verbose=False,
+    )
+    inference_ms = (time.perf_counter() - t0) * 1000
+
+    # ── Parse boxes ────────────────────────────────────────────────────────
+    detections: List[Detection] = []
+    r0    = results[0]
+    boxes = r0.boxes
+
+    if boxes is not None and len(boxes):
+        for box in boxes:
+            cid    = int(box.cls[0].item())
+            score  = round(float(box.conf[0].item()), 4)
+            xyxy   = box.xyxy[0].tolist()          # [x1, y1, x2, y2]
+            x1, y1, x2, y2 = xyxy
+            label  = _model.names[cid]
+
+            detections.append(Detection(
+                class_id=cid,
+                class_name=label,
+                ecocycle_stream=to_ecocycle(label),
+                confidence=score,
+                bounding_box=BoundingBox(
+                    x1=round(x1, 2),
+                    y1=round(y1, 2),
+                    x2=round(x2, 2),
+                    y2=round(y2, 2),
+                    width=round(x2 - x1, 2),
+                    height=round(y2 - y1, 2),
+                ),
+            ))
+
+    # Sort by confidence descending
+    detections.sort(key=lambda d: d.confidence, reverse=True)
+
+    # Encode annotated image (bounding boxes) as base64 JPEG
+    detected_image_b64: Optional[str] = None
     try:
-        if backend == "onnx":
-            from onnx_backend import get_onnx_session
+        annotated_bgr = results[0].plot()          # numpy BGR uint8
+        annotated_rgb = annotated_bgr[:, :, ::-1]  # BGR → RGB
+        pil_out = Image.fromarray(annotated_rgb)
+        buf = io.BytesIO()
+        pil_out.save(buf, format="JPEG", quality=85)
+        detected_image_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as _e:
+        pass  # Non-fatal — client falls back to the original image
 
-            if not Path(MODEL_PATH).is_file():
-                raise RuntimeError(
-                    f"ONNX model not found at {MODEL_PATH}. "
-                    "Export: yolo export model=best.pt format=onnx simplify=True imgsz=640 "
-                    "Upload best.onnx (YOLO_WEIGHTS_URL) or mount under /app/weights/best.onnx."
-                )
-            session = get_onnx_session(MODEL_PATH)
-            predictions = session.predict(pil, DEFAULT_CONF)
-        else:
-            model = get_model_torch()
-            results = model(
-                pil,
-                conf=DEFAULT_CONF,
-                iou=YOLO_IOU,
-                imgsz=YOLO_IMGSZ,
-                device=DEVICE,
-                max_det=300,
-                half=False,
-                verbose=False,
-            )
-            boxes = results[0].boxes
-            if boxes is not None and len(boxes) > 0:
-                names = model.names
-                for box in boxes:
-                    cls_id = int(box.cls[0].item())
-                    conf = float(box.conf[0].item())
-                    label = names[cls_id] if isinstance(names, dict) else names[cls_id]
-                    predictions.append({"label": str(label), "confidence": conf})
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+    return DetectionResponse(
+        success=True,
+        image_width=img_w,
+        image_height=img_h,
+        inference_ms=round(inference_ms, 2),
+        detection_count=len(detections),
+        detections=detections,
+        detected_image=detected_image_b64,
+    )
 
-    predictions.sort(key=lambda p: p["confidence"], reverse=True)
-    return {"predictions": predictions}
+
+# ── Dev runner ────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("inference_api:app", host="0.0.0.0", port=port, reload=True)

@@ -5,6 +5,7 @@ import { generateIdempotencyKey } from '../utils/idempotencyKey.js';
 import { AuditService } from './AuditService.js';
 import { getRedis } from '../config/redis.js';
 import { broadcastSubmission } from '../sockets/leaderboard.socket.js';
+import { getConfig } from '../config/system.config.js';
 
 const POINTS_MAP = {
   recyclable: 10,
@@ -97,7 +98,7 @@ export const RewardService = {
       if (!user.categoryCounts) user.categoryCounts = {};
       user.categoryCounts[submission.category] = (user.categoryCounts[submission.category] || 0) + 1;
 
-      if (submission.confidence >= 0.72) {
+      if (submission.confidence >= (getConfig().HIGH_CONF_THRESHOLD ?? 0.73)) {
         user.highConfCount = (user.highConfCount || 0) + 1;
       }
       user.accuracyRate = Math.round((user.highConfCount / user.submissionCount) * 100);

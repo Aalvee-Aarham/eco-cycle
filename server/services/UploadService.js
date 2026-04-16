@@ -21,4 +21,21 @@ export const UploadService = {
       uploadStream.end(buffer);
     });
   },
+
+  /**
+   * Upload a base64 encoded image to Cloudinary.
+   */
+  async uploadBase64(b64String, folder = 'ecocycle/detections') {
+    try {
+      const dataStr = b64String.startsWith('data:') ? b64String : `data:image/jpeg;base64,${b64String}`;
+      const result = await cloudinary.uploader.upload(dataStr, {
+        folder,
+        resource_type: 'image',
+      });
+      return result.secure_url;
+    } catch (err) {
+      console.error('Cloudinary base64 upload failed:', err.message);
+      return null;
+    }
+  },
 };

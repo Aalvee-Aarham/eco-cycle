@@ -95,6 +95,31 @@ npm run seed
 npm run dev
 ```
 
+### Running All Services (Client + Server + YOLO)
+
+To run the frontend, backend, and YOLO inference service simultaneously:
+
+**Windows (PowerShell):**
+```powershell
+.\dev-all.ps1
+```
+
+**Windows (Command Prompt):**
+```cmd
+dev-all.bat
+```
+
+**macOS / Linux:**
+```bash
+chmod +x dev-all.sh
+./dev-all.sh
+```
+
+This will open three new terminal windows for:
+- 🖥️ **Client**: http://localhost:5173 (React Vite)
+- ⚙️ **Server**: http://localhost:3000 (Node.js Express)
+- 🤖 **YOLO API**: http://localhost:8000 (Python inference)
+
 ---
 
 ---

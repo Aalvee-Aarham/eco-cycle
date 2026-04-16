@@ -7,11 +7,26 @@ import Submission from '../models/Submission.js';
 
 const router = Router();
 
+// All dispute states tracked in the moderator view
+const DISPUTE_STATES = ['IN_DISPUTE', 'RESOLVED_AUTO', 'RESOLVED_MANUAL', 'FLAGGED'];
+const ACTIVE_STATES  = ['IN_DISPUTE', 'FLAGGED'];   // states a moderator can still act on
+const RESOLVABLE     = ['IN_DISPUTE', 'FLAGGED'];
+
 // GET /api/disputes/queue — Moderator+
+// Returns IN_DISPUTE and FLAGGED (active items needing attention), plus RESOLVED_AUTO for reference
 router.get('/queue', auth, requireRole('moderator'), async (req, res, next) => {
   try {
-    const { limit = 20, skip = 0 } = req.query;
-    const query = { state: { $in: ['IN_DISPUTE', 'FLAGGED'] } };
+    const { limit = 20, skip = 0, state } = req.query;
+
+    // Allow filtering by a specific state, default to active states
+    let stateFilter;
+    if (state && DISPUTE_STATES.includes(state)) {
+      stateFilter = [state];
+    } else {
+      stateFilter = DISPUTE_STATES; // show all 4 states in the full queue
+    }
+
+    const query = { state: { $in: stateFilter } };
     const queue = await Submission.find(query)
       .sort({ createdAt: 1 })
       .skip(Number(skip))
@@ -26,26 +41,23 @@ router.get('/queue', auth, requireRole('moderator'), async (req, res, next) => {
 });
 
 // GET /api/disputes/:id/audit — Moderator: inspect audit entries for a specific submission
-// Spec: "inspect audit entries for submissions under review"
 router.get('/:id/audit', auth, requireRole('moderator'), async (req, res, next) => {
   try {
     const sub = await Submission.findById(req.params.id).lean();
     if (!sub) return res.status(404).json({ error: 'Submission not found' });
 
-    // Fetch all audit events related to this specific submission
     const logs = await AuditService.query({
       targetId: req.params.id,
       limit: 100,
     });
 
-    // Also fetch events recorded in metadata.submissionId
     const metaLogs = await (await import('../models/AuditLog.js')).default
       .find({ 'metadata.submissionId': sub._id })
       .sort({ createdAt: 1 })
       .populate('actor', 'username role')
       .lean();
 
-    // Merge and deduplicate by _id
+    // Merge and deduplicate
     const all = [...logs, ...metaLogs];
     const seen = new Set();
     const merged = all.filter((l) => {
@@ -62,6 +74,7 @@ router.get('/:id/audit', auth, requireRole('moderator'), async (req, res, next) 
 });
 
 // POST /api/disputes/:id/resolve — Moderator+
+// Resolves both IN_DISPUTE (medium confidence) and FLAGGED submissions
 router.post('/:id/resolve', auth, requireRole('moderator'), async (req, res, next) => {
   try {
     const { category, outcome } = req.body;
@@ -74,8 +87,12 @@ router.post('/:id/resolve', auth, requireRole('moderator'), async (req, res, nex
 
     const sub = await Submission.findById(req.params.id);
     if (!sub) return res.status(404).json({ error: 'Submission not found' });
-    if (!['IN_DISPUTE', 'FLAGGED'].includes(sub.state)) {
-      return res.status(422).json({ error: 'Submission is not in a resolvable state', currentState: sub.state });
+    if (!RESOLVABLE.includes(sub.state)) {
+      return res.status(422).json({
+        error: 'Submission is not in a resolvable state',
+        currentState: sub.state,
+        resolvableStates: RESOLVABLE,
+      });
     }
 
     const resolved = await DisputeService.resolveManual(sub, req.user._id, category, outcome);
@@ -85,11 +102,11 @@ router.post('/:id/resolve', auth, requireRole('moderator'), async (req, res, nex
   }
 });
 
-// GET /api/disputes/stats — Moderator: overview of dispute states
+// GET /api/disputes/stats — Moderator: counts for all 4 dispute-related states
 router.get('/stats', auth, requireRole('moderator'), async (req, res, next) => {
   try {
     const stats = await Submission.aggregate([
-      { $match: { state: { $in: ['IN_DISPUTE', 'RESOLVED_AUTO', 'RESOLVED_MANUAL', 'FLAGGED'] } } },
+      { $match: { state: { $in: DISPUTE_STATES } } },
       { $group: { _id: '$state', count: { $sum: 1 } } },
     ]);
     res.json(stats);
