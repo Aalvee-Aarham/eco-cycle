@@ -16,12 +16,12 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          rm -rf .git
-          git init
-          git checkout -b main
           git lfs install
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git add .
+          # Create an orphan branch to wipe history
+          git checkout --orphan latest_branch
+          git add -A
           git commit -m "Auto-sync from GitHub"
-          git push --force https://aalveeaarham2003:$HF_TOKEN@huggingface.co/spaces/aalveeaarham2003/ecocycle-api main
+          # Force push the new branch as 'main' to HF
+          git push --force https://aalveeaarham2003:$HF_TOKEN@huggingface.co/spaces/aalveeaarham2003/ecocycle-api latest_branch:main
