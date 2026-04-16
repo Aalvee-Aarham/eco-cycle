@@ -1,11 +1,6 @@
-# This file tells Railway to use Nixpacks (Node.js) instead of the root Dockerfile
-# This allows Hugging Face to use the Dockerfile while Railway stays a lightweight Node server.
-
 [build]
 builder = "nixpacks"
 
 [deploy]
 startCommand = "npm start"
 healthcheckPath = "/health"
-# Ensure it runs the server workspace
-root = "server"
