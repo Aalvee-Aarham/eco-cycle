@@ -93,11 +93,13 @@ export class YOLOAdapter extends ClassifierAdapter {
       throw new Error('YOLO_API_URL is not set');
     }
 
+    const fullUrl = url.endsWith('/detect') ? url : `${url.replace(/\/$/, '')}/detect`;
+
     // inference_api.py /detect expects multipart field named "file"
     const form = new FormData();
     form.append('file', imageBuffer, { contentType: mimeType, filename: 'image.jpg' });
 
-    const { data } = await axios.post(url, form, {
+    const { data } = await axios.post(fullUrl, form, {
       headers: form.getHeaders(),
       timeout: DEFAULT_TIMEOUT_MS,
     });
